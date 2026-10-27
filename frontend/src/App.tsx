@@ -41,9 +41,9 @@ export function App() {
     // unconfigured. Only force the setup pane for a genuinely unconfigured
     // installation, and once it reports configured, always land on Overview.
     if (configured && !previouslyConfigured.current && page !== "setup") setPage("dashboard");
-    if (!configured && !data.error) setPage("setup");
+    if (!configured && !data.error && data.health.status !== "starting") setPage("setup");
     previouslyConfigured.current = configured;
-  }, [configured, data.error, page]);
+  }, [configured, data.error, data.health.status, page]);
   if (authChecking) return <div className="auth-shell"><p className="help-text">Checking session…</p></div>;
   if (!getApiKey()) return <div className="auth-shell">{data.error && <div className="offline-note"><span>◌</span>{data.error}</div>}<AuthScreen needsAdmin={data.health.needs_admin} onAuthed={(s) => { setApiKey(s.api_key); setSession({ username: s.username, is_admin: s.is_admin }); void data.refresh(); }} /></div>;
   const logout = async () => { try { await api.logout(); } catch { /* key already invalid */ } setApiKey(""); setSession(null); };
