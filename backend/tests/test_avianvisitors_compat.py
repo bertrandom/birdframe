@@ -54,3 +54,31 @@ def test_avianvisitors_original_layout_renders_a_landscape_collage(tmp_path: Pat
     )
     assert image.size == (640, 360)
     assert len(species) == 3
+
+
+def test_collage_background_color_overrides_paper_tone(tmp_path: Path):
+    birds = [SpeciesCount("Common Swift", "Apus apus", 1, 1, "2026-01-01T00:00:00Z")]
+    settings = PublicSettings(output_width=640, output_height=360, paper_tone="#f2e4c9")
+    image, _ = collage_image(birds, settings, tmp_path)
+    assert image.getpixel((0, 0)) == (242, 228, 201)
+    image, _ = collage_image(birds, settings.model_copy(update={"background_color": "#203040"}), tmp_path)
+    assert image.getpixel((0, 0)) == (32, 48, 64)
+
+
+def test_text_color_is_used_for_labels_and_faded_toward_background():
+    from birdframe.compositor import DEFAULT_INK, _ink
+
+    assert _ink(PublicSettings()) == DEFAULT_INK
+    ink = _ink(PublicSettings(background_color="#000000", text_color="#ffffff"))
+    assert ink.text == (255, 255, 255)
+    assert ink.muted == (204, 204, 204)
+    assert ink.rule == (171, 171, 171)
+
+
+def test_collage_legend_uses_text_color(tmp_path: Path):
+    birds = [SpeciesCount("Common Swift", "Apus apus", 1, 1, "2026-01-01T00:00:00Z")]
+    settings = PublicSettings(output_width=1280, output_height=720, labels_enabled=True,
+                              background_color="#000000", text_color="#00ff00")
+    image, _ = collage_image(birds, settings, tmp_path)
+    colours = {colour for _, colour in image.getcolors(1280 * 720)}
+    assert (0, 255, 0) in colours

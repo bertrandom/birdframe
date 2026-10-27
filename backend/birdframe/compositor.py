@@ -6,7 +6,7 @@ import random
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, NamedTuple
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
@@ -61,6 +61,31 @@ def _hex_rgb(value: str) -> tuple[int, int, int]:
     if len(value) == 6:
         return tuple(int(value[index:index + 2], 16) for index in (0, 2, 4))  # type: ignore[return-value]
     return (242, 228, 201)
+
+
+def _background_rgb(settings: PublicSettings) -> tuple[int, int, int]:
+    return _hex_rgb(settings.background_color or settings.paper_tone)
+
+
+class Ink(NamedTuple):
+    text: tuple[int, int, int]
+    muted: tuple[int, int, int]
+    rule: tuple[int, int, int]
+
+
+DEFAULT_INK = Ink((74, 57, 41), (110, 90, 65), (130, 108, 77))
+
+
+def _ink(settings: PublicSettings) -> Ink:
+    """Text colours; secondary lines and rules fade the chosen colour toward the background."""
+    if not settings.text_color:
+        return DEFAULT_INK
+    text, paper = _hex_rgb(settings.text_color), _background_rgb(settings)
+
+    def fade(amount: float) -> tuple[int, int, int]:
+        return tuple(round(t + (p - t) * amount) for t, p in zip(text, paper))  # type: ignore[return-value]
+
+    return Ink(text, fade(0.2), fade(0.33))
 
 
 def _asset_path(art_dir: Path, species: SpeciesCount, pose: str) -> Path:
@@ -455,12 +480,12 @@ def journal_image(species: list[SpeciesCount], settings: PublicSettings, art_dir
     return canvas, placements
 
 
-def _draw_number(draw: ImageDraw.ImageDraw, x: int, y: int, number: int, paper: tuple[int, int, int], radius: int = 27) -> None:
-    draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=paper, outline=(74, 57, 41), width=3)
+def _draw_number(draw: ImageDraw.ImageDraw, x: int, y: int, number: int, paper: tuple[int, int, int], ink: Ink, radius: int = 27) -> None:
+    draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=paper, outline=ink.text, width=3)
     text = str(number)
     font = _font(max(18, int(radius * 1.1)))
     box = draw.textbbox((0, 0), text, font=font)
-    draw.text((x - (box[2] - box[0]) / 2, y - (box[3] - box[1]) / 2 - 2), text, fill=(74, 57, 41), font=font)
+    draw.text((x - (box[2] - box[0]) / 2, y - (box[3] - box[1]) / 2 - 2), text, fill=ink.text, font=font)
 
 
 def _marker_position(placement: Placement, birds: Image.Image, markers: Image.Image, width: int, height: int, margin: int, radius: int) -> tuple[int, int, int, int] | None:
@@ -502,10 +527,10 @@ def _marker_position(placement: Placement, birds: Image.Image, markers: Image.Im
     return None
 
 
-def _draw_legend(canvas: Image.Image, placements: list[Placement], start_x: int, paper: tuple[int, int, int], script_size: str, locale: str) -> None:
+def _draw_legend(canvas: Image.Image, placements: list[Placement], start_x: int, paper: tuple[int, int, int], ink: Ink, script_size: str, locale: str) -> None:
     draw = ImageDraw.Draw(canvas)
     width, height = canvas.size
-    draw.line((start_x, 88, start_x, height - 88), fill=(130, 108, 77), width=2)
+    draw.line((start_x, 88, start_x, height - 88), fill=ink.rule, width=2)
     scale = {"small": 0.82, "medium": 1.0, "large": 1.22}[script_size]
     available = height - 205
     row_height = max(32, min(int(104 * scale), available // max(1, len(placements))))
@@ -514,22 +539,23 @@ def _draw_legend(canvas: Image.Image, placements: list[Placement], start_x: int,
     fitted_scale = min(scale, row_height / 62)
     title_font = _script_font(int(42 * min(scale, 1.0)))
     name_font, latin_font = _script_font(max(13, int(33 * fitted_scale))), _font(max(11, int(22 * fitted_scale)), italic=True)
-    draw.text((start_x + 42, 94), "Dagens fugler", fill=(74, 57, 41), font=title_font)
+    draw.text((start_x + 42, 94), "Dagens fugler", fill=ink.text, font=title_font)
     for number, placement in enumerate(placements, start=1):
         y = 174 + (number - 1) * row_height
-        _draw_number(draw, start_x + 62, y + 22, number, paper)
-        draw.text((start_x + 106, y), _localized_name(placement.species, locale), fill=(74, 57, 41), font=name_font)
-        draw.text((start_x + 106, y + 34), placement.species.scientific_name or placement.species.common_name, fill=(110, 90, 65), font=latin_font)
+        _draw_number(draw, start_x + 62, y + 22, number, paper, ink)
+        draw.text((start_x + 106, y), _localized_name(placement.species, locale), fill=ink.text, font=name_font)
+        draw.text((start_x + 106, y + 34), placement.species.scientific_name or placement.species.common_name, fill=ink.muted, font=latin_font)
 
 
 def collage_image(species: list[SpeciesCount], settings: PublicSettings, art_dir: Path) -> tuple[Image.Image, list[dict[str, object]]]:
     width, height = settings.output_width, settings.output_height
-    canvas = Image.new("RGB", (width, height), _hex_rgb(settings.paper_tone))
+    canvas = Image.new("RGB", (width, height), _background_rgb(settings))
+    ink = _ink(settings)
     if not species:
         draw = ImageDraw.Draw(canvas)
-        draw.text((width // 2 - 130, height // 2), "Waiting for birds…", fill=(74, 57, 41), font=None)
+        draw.text((width // 2 - 130, height // 2), "Waiting for birds…", fill=ink.text, font=None)
         return canvas, []
-    paper = _hex_rgb(settings.paper_tone)
+    paper = _background_rgb(settings)
     avian_style = settings.collage_style == "avianvisitors_horizontal"
     avian_exact = settings.collage_style == "avianvisitors_exact"
     legend_width = int(width * (0.26 if avian_style else 0.28)) if settings.labels_enabled else 0
@@ -586,11 +612,11 @@ def collage_image(species: list[SpeciesCount], settings: PublicSettings, art_dir
     if avian_style:
         draw = ImageDraw.Draw(canvas)
         inset = max(24, min(width, height) // 60)
-        draw.rectangle((inset, inset, art_width - inset, height - inset), outline=(128, 103, 72), width=max(2, inset // 10))
+        draw.rectangle((inset, inset, art_width - inset, height - inset), outline=ink.rule, width=max(2, inset // 10))
         title = _font(max(23, int(height * 0.027)), italic=True)
         subtitle = _font(max(15, int(height * 0.016)), italic=True)
-        draw.text((margin * 1.5, inset * 1.2), "Avian Visitors", fill=(74, 57, 41), font=title)
-        draw.text((margin * 1.5, inset * 1.2 + int(height * 0.034)), "A horizontal field plate", fill=(110, 90, 65), font=subtitle)
+        draw.text((margin * 1.5, inset * 1.2), "Avian Visitors", fill=ink.text, font=title)
+        draw.text((margin * 1.5, inset * 1.2 + int(height * 0.034)), "A horizontal field plate", fill=ink.muted, font=subtitle)
     bird_occupancy = Image.new("L", (art_width, height), 0)
     for placement in placements:
         bird_occupancy.paste(255, (placement.x, placement.y), placement.image.getchannel("A"))
@@ -613,19 +639,19 @@ def collage_image(species: list[SpeciesCount], settings: PublicSettings, art_dir
                 break
         draw = ImageDraw.Draw(canvas)
         for number, marker_x, marker_y, _anchor_x, _anchor_y in marker_data:
-            _draw_number(draw, marker_x, marker_y, number, paper, radius)
+            _draw_number(draw, marker_x, marker_y, number, paper, ink, radius)
     species_data = [{"common_name": item.species.common_name, "scientific_name": item.species.scientific_name,
                      "count": item.species.count, "confidence": item.species.confidence,
                      "latest_at": item.species.latest_at, "x": item.x, "y": item.y,
                      "width": item.image.width, "height": item.image.height} for item in placements]
     if settings.labels_enabled:
-        _draw_legend(canvas, placements, art_width, paper, settings.legend_script_size, settings.language)
+        _draw_legend(canvas, placements, art_width, paper, ink, settings.legend_script_size, settings.language)
     return canvas, species_data
 
 
 def latest_visitor_image(species: list[SpeciesCount], settings: PublicSettings, art_dir: Path) -> tuple[Image.Image, list[dict[str, object]]]:
     width, height = settings.output_width, settings.output_height
-    canvas = Image.new("RGB", (width, height), _hex_rgb(settings.paper_tone))
+    canvas = Image.new("RGB", (width, height), _background_rgb(settings))
     if not species:
         return collage_image([], settings, art_dir)
     bird = max(species, key=lambda item: item.latest_at)
@@ -639,9 +665,10 @@ def latest_visitor_image(species: list[SpeciesCount], settings: PublicSettings, 
     canvas.paste(asset, (x, y), asset)
     if settings.labels_enabled:
         draw = ImageDraw.Draw(canvas)
-        draw.text((48, height - 100), bird.common_name, fill=(74, 57, 41))
+        ink = _ink(settings)
+        draw.text((48, height - 100), bird.common_name, fill=ink.text)
         if bird.scientific_name:
-            draw.text((48, height - 60), bird.scientific_name, fill=(110, 90, 65))
+            draw.text((48, height - 60), bird.scientific_name, fill=ink.muted)
     return canvas, [{"common_name": bird.common_name, "scientific_name": bird.scientific_name, "count": bird.count,
                      "confidence": bird.confidence, "latest_at": bird.latest_at, "x": x, "y": y,
                      "width": asset.width, "height": asset.height}]

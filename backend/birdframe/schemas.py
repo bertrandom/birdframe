@@ -34,6 +34,10 @@ class PublicSettings(BaseModel):
     legend_script_size: Literal["small", "medium", "large"] = "medium"
     collage_style: Literal["classic", "avianvisitors_horizontal", "avianvisitors_exact"] = "classic"
     paper_tone: str = "#f2e4c9"
+    # Empty keeps the collage on the paper tone used for generated artwork.
+    background_color: str = Field(default="", pattern=r"^(#[0-9a-fA-F]{6})?$")
+    # Empty keeps the original brown ink for titles, legends and numbers.
+    text_color: str = Field(default="", pattern=r"^(#[0-9a-fA-F]{6})?$")
     palette: Literal["classic", "muted", "vivid"] = "classic"
     collage_density: Literal["sparse", "standard", "full"] = "standard"
     pose_preference: Literal["balanced", "perched", "flight"] = "balanced"
