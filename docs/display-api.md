@@ -1,16 +1,17 @@
 # Current display API
 
 BirdFrame publishes one immutable composition revision at a stable LAN URL.
-The JPEG bytes are the same artifact selected for Samsung upload; it is not a
+The JPEG bytes are the same artifact BirdFrame sends to the EO1; it is not a
 preview, redirect, or re-render.
 
 | Endpoint | Use |
 | --- | --- |
-| `GET` / `HEAD` `/api/v1/display/current.jpg` | Current 16:9 JPEG |
+| `GET` / `HEAD` `/api/v1/display/current.jpg` | Current JPEG |
 | `GET` `/api/v1/display/current.json` | Revision, dimensions, ETag, mode, and species summary |
 | `GET` `/api/v1/display/events` | Optional server-sent events for revision changes |
+| `GET` `/api/v1/display/compositions/{revision}.jpg` | One revision's JPEG; immutable and cacheable for good. This is the URL BirdFrame gives the [EO1](eo1.md). |
 
-Until the first composition exists, `current.jpg` returns a built-in 16:9 setup
+Until the first composition exists, `current.jpg` returns a built-in setup
 image. The URL remains stable when compositions change.
 
 ## Caching
@@ -39,6 +40,6 @@ last valid image when BirdFrame is unavailable.
 LAN read access is enabled by default. In Settings, an owner can disable the
 API, require its separate read-only token, hide detailed timestamps/confidence
 from metadata, and restrict allowed private subnets. This token is not an
-administrator login and must never be an OpenRouter, BirdWeather, or Samsung
+administrator login and must never be an OpenRouter or BirdWeather
 credential. Use HTTPS/reverse-proxy authentication if exposing the service
 beyond a trusted LAN; direct public exposure is unsupported.

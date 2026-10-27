@@ -4,7 +4,8 @@ import json
 import httpx
 import pytest
 
-from birdframe.adapters import BIRDNET_GO_SSE_READ_TIMEOUT, BirdNETGoClient, BirdWeatherClient, OpenRouterClient, PublicBirdWeatherClient, SamsungFrameClient
+from birdframe.adapters import (BIRDNET_GO_SSE_READ_TIMEOUT, AdapterError, BirdNETGoClient, BirdWeatherClient, EO1Client, OpenRouterClient,
+                                ProviderUnavailable, PublicBirdWeatherClient, eo1_base_url)
 
 
 def async_client(handler):
@@ -123,42 +124,40 @@ async def test_openrouter_filters_image_models_and_decodes_generated_b64():
     await client.aclose()
 
 
-@pytest.mark.asyncio
-async def test_samsung_upload_uses_art_mode_interface_without_library_import():
-    events = []
-    class Art:
-        def upload(self, image, *, file_type, matte): events.append((image, file_type, matte)); return "MY_F0001"
-        def select_image(self, content_id, *, show): events.append((content_id, show))
-    class TV:
-        def art(self): return Art()
-    result = await SamsungFrameClient("10.0.0.3", tv_factory=lambda **kwargs: TV()).upload_and_select(b"jpeg", show=False)
-    assert result.content_id == "MY_F0001"
-    assert events == [(b"jpeg", "JPG", "none"), ("MY_F0001", False)]
+def test_eo1_host_accepts_hostname_host_port_or_url():
+    assert eo1_base_url("eo1.local") == "http://eo1.local:12345/"
+    assert eo1_base_url(" 192.168.1.158:8080 ") == "http://192.168.1.158:8080/"
+    assert eo1_base_url("http://eo1.local:12345/") == "http://eo1.local:12345/"
+    with pytest.raises(ValueError):
+        eo1_base_url("")
 
 
 @pytest.mark.asyncio
-async def test_samsung_upload_only_switches_to_art_mode_when_already_active():
-    class Art:
-        def __init__(self, mode): self.mode = mode
-        def upload(self, image, *, file_type, matte): return "MY_F0001"
-        def get_artmode(self): return self.mode
-        def select_image(self, content_id, *, show): self.shown = show
-    class TV:
-        def __init__(self, mode): self.artmode = mode
-        def art(self): return Art(self.artmode)
+async def test_eo1_show_posts_the_image_url_and_returns_state():
+    async def handler(request):
+        assert request.method == "POST" and request.url.path == "/api/v1/show"
+        assert json.loads(request.content) == {"url": "http://birdframe.test/a.jpg", "type": "image"}
+        return httpx.Response(200, json={"mode": "single", "item": {"url": "http://birdframe.test/a.jpg"}})
+    client = async_client(handler)
+    eo1 = EO1Client("eo1.local", client=client)
+    assert eo1.base_url == "http://eo1.local:12345/"
+    assert (await eo1.show("http://birdframe.test/a.jpg"))["mode"] == "single"
+    await client.aclose()
 
-    on = SamsungFrameClient("10.0.0.3", tv_factory=lambda **kwargs: TV("on"))
-    result = await on.upload_and_select(b"jpeg")
-    assert result.selected is True
 
-    off = SamsungFrameClient("10.0.0.3", tv_factory=lambda **kwargs: TV("off"))
-    result = await off.upload_and_select(b"jpeg")
-    assert result.selected is False
+@pytest.mark.asyncio
+async def test_eo1_errors_carry_the_frame_message():
+    async def handler(request):
+        return httpx.Response(400, json={"error": {"code": "invalid_value", "field": "url", "message": "url is required"}})
+    client = async_client(handler)
+    with pytest.raises(AdapterError, match="HTTP 400: url is required"):
+        await EO1Client("eo1.local", client=client).show("")
+    await client.aclose()
 
-    class BrokenArt(Art):
-        def get_artmode(self): raise RuntimeError("tv busy")
-    class BrokenTV:
-        def art(self): return BrokenArt("on")
-    broken = SamsungFrameClient("10.0.0.3", tv_factory=lambda **kwargs: BrokenTV())
-    result = await broken.upload_and_select(b"jpeg")
-    assert result.selected is False
+    async def unreachable(request):
+        raise httpx.ConnectError("refused", request=request)
+    client = async_client(unreachable)
+    with pytest.raises(ProviderUnavailable, match="unreachable"):
+        await EO1Client("eo1.local", client=client).state()
+    await client.aclose()
+

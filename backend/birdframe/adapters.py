@@ -1,19 +1,17 @@
-"""Network adapters for detection providers, image generation, and Frame TVs.
+"""Network adapters for detection providers, image generation, and the EO1 display.
 
 They are deliberately independent of FastAPI and persistence.  The application
 can map :class:`Detection` and the result DTOs to its own database models.
 """
 from __future__ import annotations
 
-import asyncio
 import base64
 import json
-import socket
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable
-from urllib.parse import quote, urljoin
+from urllib.parse import quote, urljoin, urlsplit
 
 import httpx
 
@@ -46,31 +44,9 @@ class ImageModel:
 class GeneratedImage:
     content: bytes; media_type: str; revised_prompt: str | None = None
 
-@dataclass(frozen=True, slots=True)
-class SamsungUpload:
-    content_id: str; selected: bool
 
 
 BIRDNET_GO_SSE_READ_TIMEOUT = 90.0
-
-
-def wake_on_lan(mac: str, *, broadcast: str = "255.255.255.255", port: int = 9) -> None:
-    """Send a Wake-on-LAN magic packet for a TV MAC address.
-
-    Wake-on-LAN only ever wakes a sleeping device; it never turns a powered-on
-    TV off, so it is safe to send before an automatic artwork update.
-    """
-    cleaned = mac.strip().replace("-", "").replace(":", "").replace(".", "")
-    if len(cleaned) != 12:
-        raise ValueError("TV MAC address must be 12 hexadecimal digits")
-    try:
-        address = bytes.fromhex(cleaned)
-    except ValueError as exc:
-        raise ValueError("TV MAC address must be 12 hexadecimal digits") from exc
-    packet = b"\xff" * 6 + address * 16
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        sock.sendto(packet, (broadcast, port))
 
 
 def _timestamp(value: Any) -> datetime:
@@ -319,40 +295,51 @@ class OpenRouterClient:
         raise AdapterError("OpenRouter response had neither image data nor URL")
 
 
-class SamsungFrameClient:
-    """Async facade over optional synchronous ``samsungtvws`` Art Mode support."""
-    def __init__(self, host: str, *, token: str | None = None, port: int = 8002, tv_factory: Callable[..., Any] | None = None, timeout: float | None = 60) -> None:
-        self.host, self.token, self.port, self._factory, self.timeout = host, token, port, tv_factory, timeout
-    def _tv(self) -> Any:
-        if self._factory: return self._factory(host=self.host, token=self.token, port=self.port)
+EO1_DEFAULT_PORT = 12345
+
+
+def eo1_base_url(host: str) -> str:
+    """Normalise an EO1 hostname, ``host:port`` or URL to its API base URL."""
+    host = host.strip().rstrip("/")
+    if not host:
+        raise ValueError("EO1 host is required")
+    if "://" not in host:
+        host = f"http://{host}"
+    parsed = urlsplit(host)
+    if not parsed.hostname:
+        raise ValueError(f"Not a valid EO1 host: {host}")
+    try:
+        port = parsed.port or EO1_DEFAULT_PORT
+    except ValueError as exc:
+        raise ValueError(f"Not a valid EO1 host: {host}") from exc
+    hostname = f"[{parsed.hostname}]" if ":" in parsed.hostname else parsed.hostname
+    return f"{parsed.scheme}://{hostname}:{port}/"
+
+
+class EO1Client:
+    """Client for the EO1 frame's HTTP API (``/api/v1`` on port 12345).
+
+    The frame downloads what it shows itself, so BirdFrame hands it the URL of
+    a composition rather than uploading image bytes.
+    """
+    def __init__(self, host: str, *, client: httpx.AsyncClient | None = None, timeout: float = 15) -> None:
+        self.base_url = eo1_base_url(host)
+        self._client = client or httpx.AsyncClient(timeout=timeout); self._owns = client is None
+    async def aclose(self) -> None:
+        if self._owns: await self._client.aclose()
+    async def _call(self, method: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         try:
-            from samsungtvws import SamsungTVWS
-        except ImportError as exc: raise ProviderUnavailable("Samsung support requires the samsungtvws extra") from exc
-        return SamsungTVWS(host=self.host, token=self.token, port=self.port, timeout=self.timeout)
-    async def upload_and_select(self, image: bytes, *, file_type: str = "JPG", matte: str = "none", show: bool = True) -> SamsungUpload:
-        if not image: raise ValueError("cannot upload an empty image")
-        def operation() -> SamsungUpload:
-            tv = self._tv(); art = tv.art(); content_id = art.upload(image, file_type=file_type, matte=matte)
-            show_now = False
-            if show:
-                # Only force Art Mode if the TV is already showing it. When the
-                # family is watching TV, upload + select quietly so the new
-                # composition is ready but the screen is not interrupted.
-                try:
-                    show_now = str(art.get_artmode()).lower() in ("on", "true", "1")
-                except Exception:
-                    show_now = False
-            art.select_image(content_id, show=show_now)
-            return SamsungUpload(str(content_id), show_now)
-        try: return await asyncio.to_thread(operation)
-        except ProviderUnavailable: raise
-        except Exception as exc: raise AdapterError(f"Samsung artwork upload failed: {exc}") from exc
-    async def delete_owned(self, content_id: str) -> None:
-        """Delete only a content id BirdFrame previously recorded as its own."""
-        if not content_id:
-            return
-        def operation() -> None:
-            self._tv().art().delete(content_id)
-        try: await asyncio.to_thread(operation)
-        except ProviderUnavailable: raise
-        except Exception as exc: raise AdapterError(f"Samsung artwork delete failed: {exc}") from exc
+            response = await self._client.request(method, urljoin(self.base_url, path), json=payload)
+        except httpx.HTTPError as exc: raise ProviderUnavailable(f"EO1 at {self.base_url} is unreachable: {type(exc).__name__}") from exc
+        try: body = response.json()
+        except ValueError: body = {}
+        if response.is_error:
+            error = body.get("error") if isinstance(body, dict) else None
+            message = error.get("message") if isinstance(error, dict) else None
+            raise AdapterError(f"EO1 returned HTTP {response.status_code}" + (f": {message}" if message else ""))
+        return body if isinstance(body, dict) else {}
+    async def show(self, url: str) -> dict[str, Any]:
+        """Show one image outside the frame's playlist, pausing its slideshow; returns the frame's state."""
+        return await self._call("POST", "api/v1/show", {"url": url, "type": "image"})
+    async def state(self) -> dict[str, Any]:
+        return await self._call("GET", "api/v1/state")

@@ -20,16 +20,17 @@ class PublicSettings(BaseModel):
     collage_hours: int = Field(default=24, ge=1, le=8760)
     confidence_threshold: float = Field(default=0.8, ge=0, le=1)
     duplicate_cooldown_minutes: int = Field(default=5, ge=0, le=1440)
-    tv_host: str = ""
-    tv_mac: str = ""
-    tv_matte: str = "none"
-    tv_auto_update_enabled: bool = True
-    tv_wake_enabled: bool = False
-    tv_quiet_hours_start: str = ""
-    tv_quiet_hours_end: str = ""
-    tv_update_minutes: int = Field(default=5, ge=1, le=1440)
-    output_width: int = Field(default=3840, ge=640, le=7680)
-    output_height: int = Field(default=2160, ge=360, le=4320)
+    # Hostname, host:port or URL of the EO1; the port defaults to 12345.
+    eo1_host: str = Field(default="", max_length=250)
+    # Where the EO1 can download compositions from, e.g. http://192.168.1.20:8765.
+    birdframe_url: str = Field(default="", max_length=250)
+    display_auto_update_enabled: bool = True
+    quiet_hours_start: str = ""
+    quiet_hours_end: str = ""
+    display_update_minutes: int = Field(default=5, ge=1, le=1440)
+    # The EO1 panel is 1080x1920 and usually hangs in portrait.
+    output_width: int = Field(default=1080, ge=640, le=7680)
+    output_height: int = Field(default=1920, ge=360, le=4320)
     labels_enabled: bool = False
     legend_script_size: Literal["small", "medium", "large"] = "medium"
     collage_style: Literal["classic", "avianvisitors_horizontal", "avianvisitors_exact"] = "classic"
@@ -92,7 +93,6 @@ class CompositionSummary(BaseModel):
     height: int
     sha256: str
     species: list[dict[str, object]]
-    tv_confirmed: bool = False
 
 
 class JobRequest(BaseModel):

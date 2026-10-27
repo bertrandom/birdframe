@@ -3,10 +3,10 @@
 # Start local microphone mode with:
 #   docker compose --profile local-audio up -d
 #
-# Both services use host networking to make Samsung TV discovery and
-# Wake-on-LAN dependable on Linux. Therefore BIRDFRAME_PORT and
-# BIRDNET_GO_PORT must not already be in use on the host. Host networking is
-# not supported for hardware discovery on Docker Desktop.
+# Both services use host networking so BirdFrame is reachable from the EO1
+# at the host's LAN address, which the frame downloads artwork from. Therefore
+# BIRDFRAME_PORT and BIRDNET_GO_PORT must not already be in use on the host.
+# Host networking is not supported on Docker Desktop.
 services:
   birdframe:
     image: ghcr.io/simenf/birdframe:${BIRDFRAME_VERSION:-0.1.2}

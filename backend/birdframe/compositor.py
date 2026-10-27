@@ -264,8 +264,13 @@ def _try_pack(items: list[tuple[SpeciesCount, Image.Image]], width: int, height:
 
 
 def _try_pack_avianvisitors(items: list[tuple[SpeciesCount, Image.Image]], width: int, height: int, margin: int, seed: int) -> list[Placement] | None:
-    """Landscape, silhouette-aware centre-out nester matching AvianVisitors' layout discipline."""
+    """Silhouette-aware centre-out nester matching AvianVisitors' layout discipline.
+
+    Birds gather in an oval along the canvas's long side: wide on a landscape
+    canvas, as in AvianVisitors, and tall on a portrait one.
+    """
     scale, padding = 4, 3
+    stretch_x, stretch_y = (2.1, 1.0) if width >= height else (1.0, 2.1)
     occupancy = Image.new("L", (math.ceil(width / scale), math.ceil(height / scale)), 0)
     rng = random.Random(seed)
     ordered = sorted(items, key=lambda pair: pair[1].width * pair[1].height, reverse=True)
@@ -293,13 +298,13 @@ def _try_pack_avianvisitors(items: list[tuple[SpeciesCount, Image.Image]], width
                 found = False
                 for sample in range(samples):
                     theta = phase + sample / samples * math.tau
-                    x = int(width / 2 + radius * 2.1 * math.cos(theta) - asset.width / 2)
-                    y = int(height / 2 + radius * math.sin(theta) - asset.height / 2)
+                    x = int(width / 2 + radius * stretch_x * math.cos(theta) - asset.width / 2)
+                    y = int(height / 2 + radius * stretch_y * math.sin(theta) - asset.height / 2)
                     if x < margin or y < margin or x + asset.width > width - margin or y + asset.height > height - margin:
                         continue
                     if _collides(occupancy, asset, x, y, scale):
                         continue
-                    cost = math.hypot((x + asset.width / 2 - com_x) / 2.1, y + asset.height / 2 - com_y) + rng.random() * step * 0.5
+                    cost = math.hypot((x + asset.width / 2 - com_x) / stretch_x, (y + asset.height / 2 - com_y) / stretch_y) + rng.random() * step * 0.5
                     if cost < best_cost:
                         selected, best_cost, found = (x, y), cost, True
                 if found:

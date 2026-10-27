@@ -1,9 +1,10 @@
 # BirdFrame
 
-BirdFrame is a self-hosted, bird visitor display for Samsung The
-Frame TVs. It listens for birds through
+BirdFrame is a self-hosted, bird visitor display for an Electric Objects EO1
+picture frame running the [custom EO1 firmware](https://github.com/bertrandom/EO1).
+It listens for birds through
 [BirdNET-Go](https://github.com/tphakala/birdnet-go) or an existing
-[BirdWeather](https://www.birdweather.com) station, and creates beatiful artwork for your samsung frame tv based on the birds in your back yard.
+[BirdWeather](https://www.birdweather.com) station, and creates beautiful artwork for your EO1 based on the birds in your back yard.
 
 It is based on the ideas of [Avianvisitors](https://github.com/Twarner491/AvianVisitors) which is the same concept, but for e-ink displays. The frame journal view is based on [willmanidis2's frame-journal-layout fork](https://github.com/willmanidis2/AvianVisitors/tree/feat/frame-journal-layout)
 
@@ -35,7 +36,7 @@ BirdFrame can draw your backyard in five ways.
 | --- | --- |
 | ![The Birds pane lists detected species and which ones still need artwork.](docs/screenshots/birds.png) | ![Settings covers artwork generation and the display API.](docs/screenshots/settings.png) |
 
-The [setup guide](docs/setup.md) walks through location, detection source, TV,
+The [setup guide](docs/setup.md) walks through location, detection source, EO1,
 artwork style, asset packs, and display updates.
 
 ![The setup guide's Artwork step shows a preview for every layout.](docs/screenshots/setup-artwork.png)
@@ -43,9 +44,9 @@ artwork style, asset packs, and display updates.
 ## Quick start
 
 Requirements: a 64-bit Linux machine (AMD64 or ARM64) with Docker Engine and a
-browser on the same LAN. A Samsung TV is only needed for direct TV control;
-Docker Desktop works for BirdWeather mode but is not a supported
-local-microphone or LAN-discovery host.
+browser on the same LAN. An EO1 with the custom firmware is only needed to
+show the artwork on a frame; Docker Desktop works for BirdWeather mode but is
+not a supported local-microphone host.
 
 Run the published multi-architecture image — no clone or build required:
 
@@ -136,7 +137,7 @@ docker compose down
 ```
 
 Back up the `data/` directory while the service is stopped. It contains the
-database, encryption key, TV token, settings, artwork, and display artifacts.
+database, encryption key, provider tokens, settings, artwork, and display artifacts.
 Do not lose `data/secret.key`: encrypted tokens cannot be recovered without it.
 
 ## Documentation
@@ -145,7 +146,7 @@ Do not lose `data/secret.key`: encrypted tokens cannot be recovered without it.
 - [Setup wizard](docs/setup.md)
 - [Microphone and BirdNET-Go](docs/microphone.md)
 - [BirdWeather](docs/birdweather.md)
-- [Samsung Frame](docs/samsung-frame.md)
+- [Electric Objects EO1](docs/eo1.md)
 - [Display API](docs/display-api.md)
 - [Artwork and packages](docs/artwork.md)
 - [Asset-pack authoring guide](docs/asset-packs.md)

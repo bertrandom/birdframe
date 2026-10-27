@@ -1,13 +1,10 @@
-import socket
 import time
 from datetime import UTC, datetime, timedelta
-from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
 
 from birdframe import main as birdframe_main
-from birdframe.adapters import wake_on_lan
 from birdframe.main import create_app, in_quiet_hours
 from birdframe.schemas import DetectionCreate, PublicSettings
 from tests.helpers import authed
@@ -88,113 +85,100 @@ def test_display_exclusion_reason_distinguishes_confidence_and_cooldown(tmp_path
 
 def test_quiet_hours_window_overnight_and_timezone():
     base = datetime(2026, 7, 31, 12, 0, tzinfo=UTC)
-    overnight = PublicSettings(timezone="UTC", tv_quiet_hours_start="22:30", tv_quiet_hours_end="07:00")
+    overnight = PublicSettings(timezone="UTC", quiet_hours_start="22:30", quiet_hours_end="07:00")
     assert in_quiet_hours(overnight, base.replace(hour=23)) is True
     assert in_quiet_hours(overnight, base.replace(hour=3)) is True
     assert in_quiet_hours(overnight, base.replace(hour=12)) is False
 
-    same_day = PublicSettings(timezone="UTC", tv_quiet_hours_start="13:00", tv_quiet_hours_end="14:00")
+    same_day = PublicSettings(timezone="UTC", quiet_hours_start="13:00", quiet_hours_end="14:00")
     assert in_quiet_hours(same_day, base.replace(hour=13, minute=30)) is True
     assert in_quiet_hours(same_day, base.replace(hour=14, minute=30)) is False
 
-    assert in_quiet_hours(PublicSettings(tv_quiet_hours_start="", tv_quiet_hours_end="")) is False
-    assert in_quiet_hours(PublicSettings(tv_quiet_hours_start="nope", tv_quiet_hours_end="07:00")) is False
+    assert in_quiet_hours(PublicSettings(quiet_hours_start="", quiet_hours_end="")) is False
+    assert in_quiet_hours(PublicSettings(quiet_hours_start="nope", quiet_hours_end="07:00")) is False
 
-    norway = PublicSettings(timezone="Europe/Oslo", tv_quiet_hours_start="22:00", tv_quiet_hours_end="06:00")
+    norway = PublicSettings(timezone="Europe/Oslo", quiet_hours_start="22:00", quiet_hours_end="06:00")
     assert in_quiet_hours(norway, datetime(2026, 7, 31, 21, 0, tzinfo=UTC)) is True
     assert in_quiet_hours(norway, datetime(2026, 7, 31, 14, 0, tzinfo=UTC)) is False
 
 
-def test_wake_on_lan_sends_magic_packet_and_validates_mac():
-    sent = []
+class FakeEO1:
+    """Test double for EO1Client; records the URLs it is asked to show."""
+    shown: list[tuple[str, str]] = []
 
-    class FakeSocket:
-        def __init__(self, family, kind):
-            assert (family, kind) == (socket.AF_INET, socket.SOCK_DGRAM)
-
-        def setsockopt(self, level, option, value):
-            pass
-
-        def sendto(self, data, address):
-            sent.append((data, address))
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return False
-
-    with patch("birdframe.adapters.socket.socket", FakeSocket):
-        wake_on_lan("AA:BB:CC:DD:EE:FF")
-    payload, address = sent[0]
-    assert payload == b"\xff" * 6 + bytes.fromhex("aabbccddeeff") * 16
-    assert address == ("255.255.255.255", 9)
-
-    with pytest.raises(ValueError):
-        wake_on_lan("not-a-mac")
-
-
-class FakeSamsung:
-    """Test double for SamsungFrameClient; records uploads."""
-    pushes: list[tuple[str, str, int]] = []
-
-    def __init__(self, host: str, *, token: str | None = None, port: int = 8002, tv_factory=None, timeout: float | None = 60):
+    def __init__(self, host: str, **kwargs):
         self.host = host
+        self.base_url = f"http://{host}:12345/"
 
-    async def upload_and_select(self, image, *, file_type="JPG", matte="none", show=True):
-        FakeSamsung.pushes.append((self.host, matte, len(image)))
-        return type("Upload", (), {"content_id": f"FAKE{len(FakeSamsung.pushes)}"})()
+    async def show(self, url):
+        FakeEO1.shown.append((self.host, url))
+        return {"mode": "single"}
 
-    async def delete_owned(self, content_id):
+    async def aclose(self):
         return None
 
 
+EO1_SETTINGS = {"eo1_host": "10.0.0.3", "birdframe_url": "http://birdframe.test:8000/"}
+
+
 @pytest.mark.asyncio
-async def test_automatic_tv_sync_respects_quiet_hours_and_wakes(tmp_path, monkeypatch):
+async def test_automatic_display_sync_respects_quiet_hours(tmp_path, monkeypatch):
     app = create_app(tmp_path)
     with TestClient(app) as client:
         authed(client)
-        _settings(client, tv_host="10.0.0.3", tv_auto_update_enabled=True, tv_wake_enabled=True,
-                  tv_mac="aa:bb:cc:dd:ee:ff", tv_update_minutes=1)
+        _settings(client, display_auto_update_enabled=True, display_update_minutes=1, **EO1_SETTINGS)
         client.post("/api/v1/detections", json={
             "common_name": "Common Swift", "scientific_name": "Apus apus",
             "confidence": 1.0, "source_event_id": "one",
         })
         service = app.state.service
-        woken: list[str] = []
-        monkeypatch.setattr(birdframe_main, "SamsungFrameClient", FakeSamsung)
-        monkeypatch.setattr(birdframe_main, "wake_on_lan", lambda mac: woken.append(mac))
+        monkeypatch.setattr(birdframe_main, "EO1Client", FakeEO1)
 
         now = datetime.now(UTC)
         _settings(client,
-                  tv_quiet_hours_start=(now - timedelta(minutes=5)).strftime("%H:%M"),
-                  tv_quiet_hours_end=(now + timedelta(minutes=5)).strftime("%H:%M"))
-        FakeSamsung.pushes = []
-        await service.sync_tv_if_due()
-        assert FakeSamsung.pushes == []
-        assert woken == []
+                  quiet_hours_start=(now - timedelta(minutes=5)).strftime("%H:%M"),
+                  quiet_hours_end=(now + timedelta(minutes=5)).strftime("%H:%M"))
+        FakeEO1.shown = []
+        await service.sync_display_if_due()
+        assert FakeEO1.shown == []
 
-        _settings(client, tv_quiet_hours_start="", tv_quiet_hours_end="")
-        await service.sync_tv_if_due()
-        assert woken == ["aa:bb:cc:dd:ee:ff"]
-        assert len(FakeSamsung.pushes) == 1
+        _settings(client, quiet_hours_start="", quiet_hours_end="")
+        await service.sync_display_if_due()
+        revision = client.get("/api/v1/compositions/current").json()["revision"]
+        assert FakeEO1.shown == [("10.0.0.3", f"http://birdframe.test:8000/api/v1/display/compositions/{revision}.jpg")]
 
-        await service.sync_tv_if_due()
-        assert len(FakeSamsung.pushes) == 1  # already uploaded the current revision
+        await service.sync_display_if_due()
+        assert len(FakeEO1.shown) == 1  # already showing the current revision
 
 
-def test_tv_push_is_queued_as_a_background_job(tmp_path, monkeypatch):
+@pytest.mark.asyncio
+async def test_automatic_display_sync_waits_for_the_update_interval(tmp_path, monkeypatch):
     app = create_app(tmp_path)
     with TestClient(app) as client:
         authed(client)
-        _settings(client, tv_host="10.0.0.3")
+        _settings(client, display_update_minutes=30, **EO1_SETTINGS)
+        monkeypatch.setattr(birdframe_main, "EO1Client", FakeEO1)
+        FakeEO1.shown = []
+        service = app.state.service
+        await service.sync_display_if_due()
+        assert len(FakeEO1.shown) == 1
+        client.post("/api/v1/compositions/rebuild")
+        await service.sync_display_if_due()
+        assert len(FakeEO1.shown) == 1  # newer revision waits for the 30-minute interval
+
+
+def test_eo1_push_is_queued_as_a_background_job(tmp_path, monkeypatch):
+    app = create_app(tmp_path)
+    with TestClient(app) as client:
+        authed(client)
+        _settings(client, **EO1_SETTINGS)
         assert client.post("/api/v1/detections", json={
             "common_name": "Common Swift", "scientific_name": "Apus apus",
             "confidence": 1.0, "source_event_id": "push-one",
         }).status_code == 201
-        monkeypatch.setattr(birdframe_main, "SamsungFrameClient", FakeSamsung)
-        FakeSamsung.pushes = []
-        response = client.post("/api/v1/tv/push")
+        monkeypatch.setattr(birdframe_main, "EO1Client", FakeEO1)
+        FakeEO1.shown = []
+        response = client.post("/api/v1/eo1/push")
         assert response.status_code == 202
         job_id = response.json()["id"]
         job = None
@@ -204,25 +188,35 @@ def test_tv_push_is_queued_as_a_background_job(tmp_path, monkeypatch):
                 break
             time.sleep(0.1)
         assert job is not None
-        assert job["kind"] == "tv_push"
+        assert job["kind"] == "eo1_push"
         assert job["status"] == "completed"
-        assert len(FakeSamsung.pushes) == 1
+        assert len(FakeEO1.shown) == 1
         logs = client.get("/api/v1/logs", params={"limit": 10}).json()
-        assert any("TV push job" in entry["message"] for entry in logs)
+        assert any("EO1 push job" in entry["message"] for entry in logs)
 
-@pytest.mark.asyncio
-async def test_automatic_tv_sync_continues_when_wake_fails(tmp_path, monkeypatch):
+        # The frame fetches exactly the URL it was given.
+        image = client.get(FakeEO1.shown[0][1].removeprefix("http://birdframe.test:8000"))
+        assert image.status_code == 200 and image.headers["content-type"] == "image/jpeg"
+        assert client.get("/api/v1/display/compositions/999.jpg").status_code == 404
+
+
+def test_eo1_push_needs_host_and_birdframe_address(tmp_path):
     app = create_app(tmp_path)
     with TestClient(app) as client:
         authed(client)
-        _settings(client, tv_host="10.0.0.3", tv_auto_update_enabled=True, tv_wake_enabled=True,
-                  tv_mac="bad-mac", tv_update_minutes=1)
-        client.post("/api/v1/detections", json={
-            "common_name": "Common Swift", "scientific_name": "Apus apus",
-            "confidence": 1.0, "source_event_id": "one",
-        })
-        service = app.state.service
-        monkeypatch.setattr(birdframe_main, "SamsungFrameClient", FakeSamsung)
-        FakeSamsung.pushes = []
-        await service.sync_tv_if_due()
-        assert len(FakeSamsung.pushes) == 1
+        assert "EO1 host" in client.post("/api/v1/eo1/push").json()["detail"]
+        _settings(client, eo1_host="10.0.0.3")
+        assert "BirdFrame address" in client.post("/api/v1/eo1/push").json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_eo1_url_carries_display_token_when_required(tmp_path, monkeypatch):
+    app = create_app(tmp_path)
+    with TestClient(app) as client:
+        authed(client)
+        _settings(client, display_api_require_token=True, display_api_token="frame-token-0123456789", **EO1_SETTINGS)
+        monkeypatch.setattr(birdframe_main, "EO1Client", FakeEO1)
+        FakeEO1.shown = []
+        result = await app.state.service.push_to_display()
+        assert FakeEO1.shown[0][1].endswith("?token=frame-token-0123456789")
+        assert "token" not in result["url"]

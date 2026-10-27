@@ -28,7 +28,7 @@ npm run dev
 
 Set the frontend development proxy/API base URL according to its local README or
 Vite configuration. Use synthetic BirdNET-Go SSE and BirdWeather fixtures in
-tests; do not require live provider keys or a real TV.
+tests; do not require live provider keys or a real EO1.
 
 Refresh the Norwegian name data only when the upstream workbook changes:
 
@@ -48,8 +48,8 @@ Required coverage includes input normalization/deduplication, display policy,
 safe package extraction, secret redaction, deterministic collage golden images,
 API authentication (first-admin bootstrap, login, key generation/revocation,
 admin-only user management), and the invariant that the current-image response
-digest equals the artifact sent to the Samsung client. Contract-test both
-detection adapters and use a fake Samsung Art Mode server for failure paths.
+digest equals the artifact served to the EO1. Contract-test both detection
+adapters and use a fake EO1 API for failure paths.
 
 ## Release checklist
 
@@ -59,12 +59,12 @@ detection adapters and use a fake Samsung Art Mode server for failure paths.
    `THIRD_PARTY_NOTICES.md`.
 4. Test a clean BirdWeather install and an optional native-Linux microphone
    install.
-5. Manually test discovery/manual-IP, pairing, upload, select, and owned-image
-   deletion on at least one Frame model.
+5. Manually test a manual and an automatic push to at least one EO1 running
+   the custom firmware, in portrait and landscape.
 6. Publish the image and a package catalog only after checksums and artifact
    licenses are verified.
 
-Never add provider tokens, Samsung pairing tokens, `data/`, model weights, or
+Never add provider tokens, display API tokens, `data/`, model weights, or
 generated artwork to git. Keep implementation changes independently inspired by
 AvianVisitors; do not copy its code/assets without a separate license review.
 

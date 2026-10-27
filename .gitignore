@@ -24,7 +24,6 @@ birdframe-data/
 *.db
 *.sqlite*
 secret.key
-samsung-token*
 
 # Generated artwork and diagnostics
 art/

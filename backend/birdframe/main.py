@@ -25,8 +25,8 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
 from . import __version__
-from .adapters import (AdapterError, BirdNETGoClient, BirdWeatherClient, Health, OpenRouterClient,
-                       ProviderUnavailable, PublicBirdWeatherClient, SamsungFrameClient, wake_on_lan)
+from .adapters import (AdapterError, BirdNETGoClient, BirdWeatherClient, EO1Client, Health, OpenRouterClient,
+                       ProviderUnavailable, PublicBirdWeatherClient)
 from .auth import api_key_prefix, generate_api_key, hash_api_key, hash_password
 from .compositor import (SpeciesCount, collage_image, group_detections, journal_image,
                          latest_visitor_image, load_species_asset, species_has_asset)
@@ -99,8 +99,8 @@ def in_quiet_hours(settings: PublicSettings, now: datetime | None = None) -> boo
     overnight ranges (start after end), and are disabled when either bound is
     empty or malformed.
     """
-    start = _minutes_of_day(settings.tv_quiet_hours_start)
-    end = _minutes_of_day(settings.tv_quiet_hours_end)
+    start = _minutes_of_day(settings.quiet_hours_start)
+    end = _minutes_of_day(settings.quiet_hours_end)
     if start is None or end is None or start == end:
         return False
     local = (now or datetime.now(UTC)).astimezone(_settings_timezone(settings))
@@ -114,7 +114,7 @@ def composition_summary(row: dict[str, Any]) -> CompositionSummary:
     return CompositionSummary(
         id=row["id"], revision=row["revision"], created_at=datetime.fromisoformat(row["created_at"]),
         mode=row["mode"], width=row["width"], height=row["height"], sha256=row["sha256"],
-        species=row["species"], tv_confirmed=row["tv_confirmed"],
+        species=row["species"],
     )
 
 
@@ -148,7 +148,7 @@ class BirdFrameService:
         self.store = store
         self.events: set[asyncio.Queue[int]] = set()
         self.render_lock = asyncio.Lock()
-        self.tv_lock = asyncio.Lock()
+        self.display_lock = asyncio.Lock()
         self.source_runtime: dict[str, object] = {
             "state": "starting",
             "last_activity_at": None,
@@ -230,51 +230,55 @@ class BirdFrameService:
             await self.render()
         return result
 
-    async def push_to_tv(self, row: dict[str, Any] | None = None) -> dict[str, object]:
-        """Upload and immediately select the composition in Samsung Art Mode."""
+    def composition_url(self, row: dict[str, Any], *, include_token: bool = True) -> str:
+        """URL the EO1 downloads a composition from; unique per revision so the frame's cache stays correct."""
         settings = self.store.get_settings()
-        if not settings.tv_host:
-            raise AdapterError("Configure a Samsung TV host first")
-        row = row or self.store.current_composition() or await self.render()
-        async with self.tv_lock:
-            tv = SamsungFrameClient(settings.tv_host, token=self.store.secret("samsung_token"), timeout=60)
-            result = await tv.upload_and_select(Path(row["path"]).read_bytes(), matte=settings.tv_matte, show=True)
-            previous = self.store.record_tv_upload(row["id"], result.content_id)
-            deleted_previous = False
-            if previous:
-                try:
-                    await tv.delete_owned(previous)
-                    deleted_previous = True
-                except AdapterError:
-                    pass
-            self.log("info", f"TV updated to composition revision {row['revision']} and selected in Art Mode")
-            return {"content_id": result.content_id, "previous_owned_content_id": previous,
-                    "deleted_previous": deleted_previous, "revision": row["revision"]}
+        base = settings.birdframe_url.strip().rstrip("/")
+        if not base:
+            raise AdapterError("Set the BirdFrame address the EO1 loads images from")
+        url = f"{base}/api/v1/display/compositions/{row['revision']}.jpg"
+        token = self.store.secret("display_api_token") if settings.display_api_require_token else None
+        if include_token and token:
+            url += "?" + urlencode({"token": token})
+        return url
 
-    async def sync_tv_if_due(self) -> None:
-        """Keep the Frame on the newest composition without polling the TV UI."""
+    async def push_to_display(self, row: dict[str, Any] | None = None) -> dict[str, object]:
+        """Ask the EO1 to show the composition; the frame pauses its playlist while it does."""
         settings = self.store.get_settings()
-        if not settings.tv_auto_update_enabled or not settings.tv_host:
+        if not settings.eo1_host:
+            raise AdapterError("Configure the EO1 host first")
+        row = row or self.store.current_composition() or await self.render()
+        url = self.composition_url(row)
+        async with self.display_lock:
+            client = EO1Client(settings.eo1_host)
+            try:
+                state = await client.show(url)
+            finally:
+                await client.aclose()
+            self.store.record_display_push(row["id"])
+            self.log("info", f"EO1 {client.base_url.rstrip('/')} now showing composition revision {row['revision']}")
+            return {"revision": row["revision"], "url": self.composition_url(row, include_token=False),
+                    "eo1": client.base_url.rstrip("/"), "mode": state.get("mode")}
+
+    async def sync_display_if_due(self) -> None:
+        """Keep the EO1 on the newest composition, at most once per update interval."""
+        settings = self.store.get_settings()
+        if not settings.display_auto_update_enabled or not settings.eo1_host:
             return
         row = self.store.current_composition()
         if not row:
             return
-        previous = self.store.latest_tv_upload()
+        previous = self.store.latest_display_push()
         if previous and previous["composition_id"] == row["id"]:
             return
         if previous:
             last_push = datetime.fromisoformat(previous["created_at"])
             elapsed = (datetime.now(UTC) - last_push.astimezone(UTC)).total_seconds()
-            if elapsed < settings.tv_update_minutes * 60:
+            if elapsed < settings.display_update_minutes * 60:
                 return
         if in_quiet_hours(settings):
             return
-        if settings.tv_wake_enabled and settings.tv_mac:
-            try:
-                wake_on_lan(settings.tv_mac)
-            except (OSError, ValueError) as exc:
-                self.log("warning", f"TV wake failed: {exc}")
-        await self.push_to_tv(row)
+        await self.push_to_display(row)
 
     async def generate_assets(self, job_id: int, request: JobRequest) -> None:
         settings = self.store.get_settings()
@@ -495,13 +499,13 @@ async def source_worker(service: BirdFrameService, stop: asyncio.Event) -> None:
                 birdnet_retry_seconds = min(60, birdnet_retry_seconds * 2)
 
 
-async def tv_sync_worker(service: BirdFrameService, stop: asyncio.Event) -> None:
-    """Select a newly rendered composition once the configured update cadence permits it."""
+async def display_sync_worker(service: BirdFrameService, stop: asyncio.Event) -> None:
+    """Send a newly rendered composition to the EO1 once the update interval permits it."""
     while not stop.is_set():
         try:
-            await service.sync_tv_if_due()
-        except (AdapterError, OSError, ProviderUnavailable) as exc:
-            service.log("warning", f"Automatic TV update deferred: {type(exc).__name__}")
+            await service.sync_display_if_due()
+        except (AdapterError, OSError) as exc:
+            service.log("warning", f"Automatic EO1 update deferred: {exc}")
         try:
             await asyncio.wait_for(stop.wait(), timeout=30)
         except asyncio.TimeoutError:
@@ -540,16 +544,16 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         if not store.current_composition():
             await service.render()
         worker = asyncio.create_task(source_worker(service, stop_sources))
-        tv_worker = asyncio.create_task(tv_sync_worker(service, stop_sources))
+        display_worker = asyncio.create_task(display_sync_worker(service, stop_sources))
         cleanup = asyncio.create_task(cleanup_worker(service, stop_sources))
         try:
             yield
         finally:
             stop_sources.set()
             worker.cancel()
-            tv_worker.cancel()
+            display_worker.cancel()
             cleanup.cancel()
-            await asyncio.gather(worker, tv_worker, cleanup, return_exceptions=True)
+            await asyncio.gather(worker, display_worker, cleanup, return_exceptions=True)
 
     app = FastAPI(title="BirdFrame", version=__version__, lifespan=lifespan)
     app.state.store = store
@@ -776,11 +780,21 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             "Cache-Control": "no-cache, must-revalidate",
         })
 
+    @app.get("/api/v1/display/compositions/{revision}.jpg", dependencies=[Depends(display_guard)])
+    async def display_revision_jpeg(revision: int) -> Response:
+        row = store.composition_by_revision(revision)
+        if not row or not Path(row["path"]).is_file():
+            raise HTTPException(status_code=404, detail="Composition not found")
+        # A revision never changes, so frames may cache it for good.
+        return FileResponse(row["path"], media_type="image/jpeg", headers={
+            "ETag": f'"{row["sha256"]}"', "Cache-Control": "public, max-age=31536000, immutable",
+        })
+
     @app.get("/api/v1/display/current.json", dependencies=[Depends(display_guard)])
     async def display_json(request: Request) -> dict[str, object]:
         row = store.current_composition() or await service.render()
         base = str(request.base_url).rstrip("/")
-        # The display endpoint remains stable for TVs and other integrations,
+        # The display endpoint remains stable for frames and other integrations,
         # while the revision query gives browsers a new cache key after rebuilds.
         return composition_summary(row).model_dump(mode="json") | {"image_url": f"{base}/api/v1/display/current.jpg?revision={row['revision']}"}
 
@@ -1011,25 +1025,27 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         finally:
             await client.aclose()
 
-    @app.post("/api/v1/tv/push", status_code=202)
-    async def push_tv() -> dict[str, int]:
-        """Queue a TV push as a background job so the web UI never blocks on it."""
+    @app.post("/api/v1/eo1/push", status_code=202)
+    async def push_eo1() -> dict[str, int]:
+        """Queue an EO1 push as a background job so the web UI never blocks on it."""
         settings = store.get_settings()
-        if not settings.tv_host:
-            raise HTTPException(status_code=400, detail="Configure a Samsung TV host first")
+        if not settings.eo1_host:
+            raise HTTPException(status_code=400, detail="Configure the EO1 host first")
+        if not settings.birdframe_url:
+            raise HTTPException(status_code=400, detail="Set the BirdFrame address the EO1 loads images from")
         row = store.current_composition() or await service.render()
-        job_id = store.create_job("tv_push", {"revision": row["revision"]})
+        job_id = store.create_job("eo1_push", {"revision": row["revision"]})
 
         async def run_push() -> None:
             store.update_job(job_id, status="running")
-            service.log("info", f"TV push job {job_id} started for revision {row['revision']}")
+            service.log("info", f"EO1 push job {job_id} started for revision {row['revision']}")
             try:
-                result = await service.push_to_tv(row)
+                result = await service.push_to_display(row)
                 store.update_job(job_id, status="completed", result=result)
-                service.log("info", f"TV push job {job_id} completed for revision {row['revision']}")
+                service.log("info", f"EO1 push job {job_id} completed for revision {row['revision']}")
             except Exception as exc:
                 store.update_job(job_id, status="failed", error=str(exc))
-                service.log("error", f"TV push job {job_id} failed: {exc}")
+                service.log("error", f"EO1 push job {job_id} failed: {exc}")
 
         asyncio.create_task(run_push())
         return {"id": job_id}

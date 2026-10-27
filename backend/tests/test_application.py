@@ -197,7 +197,7 @@ def test_settings_survive_application_restart(tmp_path: Path):
             "location_label": "Oslo, Norway",
             "detection_source": "birdweather_public",
             "birdweather_public_station_id": 2505,
-            "tv_host": "192.168.1.134",
+            "eo1_host": "192.168.1.158",
             "collage_style": "avianvisitors_horizontal",
             "legend_script_size": "large",
             "openrouter_api_key": "test-openrouter-key",
@@ -210,7 +210,7 @@ def test_settings_survive_application_restart(tmp_path: Path):
         saved = client.get("/api/v1/settings").json()
         assert saved["location_label"] == "Oslo, Norway"
         assert saved["birdweather_public_station_id"] == 2505
-        assert saved["tv_host"] == "192.168.1.134"
+        assert saved["eo1_host"] == "192.168.1.158"
         assert saved["collage_style"] == "avianvisitors_horizontal"
         assert saved["legend_script_size"] == "large"
         assert saved["has_openrouter_api_key"] is True

@@ -1,7 +1,7 @@
 export type SourceRuntime = { state: string; last_activity_at?: string | null; last_detection_at?: string | null; reconnects: number; last_error?: string | null };
 export type Health = { status: string; version: string; composition_revision: number | null; needs_setup?: boolean; needs_admin?: boolean; source?: SourceRuntime };
 export type Detection = { id: string; common_name: string; scientific_name?: string; confidence?: number; detected_at: string; source_type?: string };
-export type Display = { revision?: number; mode?: string; image_url?: string; created_at?: string; species?: Array<{ common_name: string; count?: number }> };
+export type Display = { revision?: number; mode?: string; image_url?: string; width?: number; height?: number; created_at?: string; species?: Array<{ common_name: string; count?: number }> };
 export type RecentBird = { common_name: string; scientific_name?: string; count: number; confidence?: number; latest_at: string; image_url: string; has_artwork?: boolean };
 export type LogEntry = { id: number; level: string; message: string; created_at: string };
 export type LogPage = { items: LogEntry[]; total: number; limit: number; offset: number };
@@ -71,7 +71,7 @@ export const api = {
   display: () => request<Display>("/display/current.json"),
   birds: () => request<RecentBird[]>("/birds/recent"),
   refresh: () => request<Display>("/compositions/rebuild", { method: "POST" }),
-  pushTv: () => request<{ id: number }>("/tv/push", { method: "POST" }),
+  pushEo1: () => request<{ id: number }>("/eo1/push", { method: "POST" }),
   models: () => request<Array<{ id: string; name?: string; pricing?: unknown }>>("/openrouter/models"),
   occurrences: () => request<Array<{ common_name: string; scientific_name: string; score: number; has_artwork?: boolean }>>("/art/occurrences"),
   generateArt: (body: { species: Array<{ common_name: string; scientific_name: string }>; model?: string; poses?: "one" | "both" }) => request<{ id: number }>("/art/generate", { method: "POST", body: JSON.stringify(body) }),

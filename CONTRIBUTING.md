@@ -6,7 +6,7 @@ framework additions.
 
 ## Before opening a pull request
 
-* Do not commit provider tokens, TV pairing data, model files, generated art,
+* Do not commit provider tokens, model files, generated art,
   local databases, or files from `data/`.
 * Check the license and attribution manifest for every artwork pack. Packs are
   optional user-provided content and are not covered by the BirdFrame license.
@@ -17,7 +17,7 @@ framework additions.
 ## Development setup
 
 See [docs/development.md](docs/development.md). Keep external services behind
-adapters so tests can use fixtures and fake TV endpoints.
+adapters so tests can use fixtures and fake EO1 endpoints.
 
 ## Pull requests
 

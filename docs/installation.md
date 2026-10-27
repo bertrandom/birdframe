@@ -1,8 +1,8 @@
 # Installation
 
-BirdFrame supports 64-bit Linux on a small PC, NAS, or Raspberry Pi 4/5. Samsung LAN discovery require native Linux networking.
-Use a wired connection where practical; the TV and host should normally be on
-the same subnet.
+BirdFrame supports 64-bit Linux on a small PC, NAS, or Raspberry Pi 4/5.
+Use a wired connection where practical; the EO1 and host should normally be on
+the same subnet, because the EO1 downloads artwork from BirdFrame.
 
 ## Quick install (published image)
 
@@ -33,8 +33,9 @@ docker run -d --name birdframe --restart unless-stopped \
   ghcr.io/simenf/birdframe:latest
 ```
 
-For reliable Samsung TV discovery and Wake-on-LAN on Linux, prefer the Docker
-Compose example at the bottom of this page, which uses host networking.
+To keep BirdFrame simply reachable from the EO1 at the host's LAN address,
+prefer the Docker Compose example at the bottom of this page, which uses host
+networking.
 
 ## Prerequisites
 
@@ -58,8 +59,9 @@ Open `http://HOST_IP:8765`. On a firewall-enabled host, allow the configured
 `BIRDFRAME_PORT` only from trusted LAN ranges. Do not publish the UI directly
 to the internet.
 
-The Compose configuration uses `network_mode: host` on Linux so multicast TV
-discovery and Wake-on-LAN work reliably. This means `BIRDFRAME_PORT` is a host
+The Compose configuration uses `network_mode: host` on Linux so BirdFrame is
+reachable from the EO1 at the host's LAN address without extra port mapping.
+This means `BIRDFRAME_PORT` is a host
 port, service names do not provide Compose DNS, and the application reaches a
 local BirdNET-Go sidecar at `http://127.0.0.1:8765`.
 
@@ -128,8 +130,8 @@ services:
 
 Notes:
 
-- `network_mode: host` makes multicast TV discovery and Wake-on-LAN reliable.
-  With host networking the app listens on port 8765 directly, so open
+- `network_mode: host` keeps BirdFrame reachable from the EO1 at the host's
+  LAN address. With host networking the app listens on port 8765 directly, so open
   `http://HOST_IP:8765` — no port mapping is needed.
 - On Docker Desktop or macOS, replace host networking with a bridge and a port
   mapping: set `ports: ["8765:8765"]` and drop `network_mode`.

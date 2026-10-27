@@ -73,8 +73,7 @@ class Store:
                   path TEXT NOT NULL,
                   sha256 TEXT NOT NULL,
                   species_json TEXT NOT NULL,
-                  created_at TEXT NOT NULL,
-                  tv_confirmed INTEGER NOT NULL DEFAULT 0
+                  created_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS jobs (
                   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -82,10 +81,9 @@ class Store:
                   result_json TEXT NOT NULL DEFAULT '{}', error TEXT NOT NULL DEFAULT '',
                   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
                 );
-                CREATE TABLE IF NOT EXISTS tv_uploads (
+                CREATE TABLE IF NOT EXISTS display_pushes (
                   id INTEGER PRIMARY KEY AUTOINCREMENT,
                   composition_id INTEGER NOT NULL,
-                  content_id TEXT NOT NULL UNIQUE,
                   created_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS logs (
@@ -112,6 +110,25 @@ class Store:
                 );
                 """
             )
+            self._drop_samsung_state(db)
+
+    @staticmethod
+    def _drop_samsung_state(db: sqlite3.Connection) -> None:
+        """Migrate databases from the Samsung Frame era to the EO1 display."""
+        db.execute("DROP TABLE IF EXISTS tv_uploads")
+        columns = {row["name"] for row in db.execute("PRAGMA table_info(compositions)")}
+        if "tv_confirmed" in columns:
+            db.execute("ALTER TABLE compositions DROP COLUMN tv_confirmed")
+        renamed = {
+            "tv_auto_update_enabled": "display_auto_update_enabled",
+            "tv_update_minutes": "display_update_minutes",
+            "tv_quiet_hours_start": "quiet_hours_start",
+            "tv_quiet_hours_end": "quiet_hours_end",
+        }
+        for old, new in renamed.items():
+            db.execute("UPDATE OR IGNORE settings SET key=? WHERE key=?", (new, old))
+        db.execute("DELETE FROM settings WHERE key IN ('tv_auto_update_enabled','tv_update_minutes','tv_quiet_hours_start',"
+                   "'tv_quiet_hours_end','tv_host','tv_mac','tv_matte','tv_wake_enabled','samsung_token')")
 
     def get_settings(self) -> SettingsResponse:
         values = PublicSettings().model_dump()
@@ -232,11 +249,19 @@ class Store:
     def current_composition(self) -> dict[str, Any] | None:
         with self.connection() as db:
             row = db.execute("SELECT * FROM compositions ORDER BY revision DESC LIMIT 1").fetchone()
+        return self._composition(row)
+
+    def composition_by_revision(self, revision: int) -> dict[str, Any] | None:
+        with self.connection() as db:
+            row = db.execute("SELECT * FROM compositions WHERE revision=?", (revision,)).fetchone()
+        return self._composition(row)
+
+    @staticmethod
+    def _composition(row: sqlite3.Row | None) -> dict[str, Any] | None:
         if not row:
             return None
         result = dict(row)
         result["species"] = json.loads(result.pop("species_json"))
-        result["tv_confirmed"] = bool(result["tv_confirmed"])
         return result
 
     def create_job(self, kind: str, payload: dict[str, Any]) -> int:
@@ -271,17 +296,13 @@ class Store:
             total = int(db.execute("SELECT COUNT(*) FROM logs").fetchone()[0])
         return [dict(row) for row in rows], total
 
-    def record_tv_upload(self, composition_id: int, content_id: str) -> str | None:
-        """Record a successful owned upload and return the prior owned content id."""
+    def record_display_push(self, composition_id: int) -> None:
         with self.connection() as db:
-            old = db.execute("SELECT content_id FROM tv_uploads ORDER BY id DESC LIMIT 1").fetchone()
-            db.execute("INSERT OR IGNORE INTO tv_uploads(composition_id,content_id,created_at) VALUES(?,?,?)", (composition_id, content_id, utcnow()))
-            db.execute("UPDATE compositions SET tv_confirmed=1 WHERE id=?", (composition_id,))
-        return old["content_id"] if old and old["content_id"] != content_id else None
+            db.execute("INSERT INTO display_pushes(composition_id,created_at) VALUES(?,?)", (composition_id, utcnow()))
 
-    def latest_tv_upload(self) -> dict[str, Any] | None:
+    def latest_display_push(self) -> dict[str, Any] | None:
         with self.connection() as db:
-            row = db.execute("SELECT composition_id,content_id,created_at FROM tv_uploads ORDER BY id DESC LIMIT 1").fetchone()
+            row = db.execute("SELECT composition_id,created_at FROM display_pushes ORDER BY id DESC LIMIT 1").fetchone()
         return dict(row) if row else None
 
     def cleanup(self, *, keep_days: int = 365, log_days: int = 30) -> dict[str, int]:
@@ -291,7 +312,7 @@ class Store:
         ``keep_days`` days and removes logs older than ``log_days`` days.
         Files are unlinked before rows so a crash between the two is healed by
         the next run, and the newest composition is always kept so the current
-        display artifact and its TV upload record survive cleanup.
+        display artifact and its push record survive cleanup.
         """
         now = datetime.now(UTC)
         window_start = now - timedelta(days=keep_days)
@@ -317,7 +338,7 @@ class Store:
         with self.connection() as db:
             for identifier, _path in removed:
                 db.execute("DELETE FROM compositions WHERE id=?", (identifier,))
-                db.execute("DELETE FROM tv_uploads WHERE composition_id=?", (identifier,))
+                db.execute("DELETE FROM display_pushes WHERE composition_id=?", (identifier,))
             log_cutoff = (now - timedelta(days=log_days)).isoformat()
             log_cursor = db.execute("DELETE FROM logs WHERE created_at < ?", (log_cutoff,))
             removed_logs = log_cursor.rowcount

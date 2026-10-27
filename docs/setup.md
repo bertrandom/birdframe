@@ -16,16 +16,18 @@ and users.
    detection filtering.
 3. **Detection source.** Choose exactly one active source: BirdWeather or
    **Birdnet-GO or Birdframe Birdprovider**. Test the connection before saving it.
-4. **Samsung Frame.** Discover a TV or enter its IP manually, approve pairing
-   on the TV, and run the upload test. The wizard deletes only its own test
-   image after success.
+4. **EO1 & display.** Enter the EO1 hostname (port 12345 unless you add
+   another), BirdFrame's address as the EO1 sees it (prefilled from your
+   browser unless that is localhost), and the orientation: Portrait
+   (1080×1920) or Landscape (1920×1080). Then choose the collage window, how
+   often the EO1 may be updated, quiet hours, and whether new artwork is shown
+   automatically. See [eo1.md](eo1.md).
 5. **Artwork.** Install a signed/checksummed package or connect OpenRouter,
    choose an image-capable model, configure a budget, review ranked species and
    estimated maximum cost, then start a resumable job.
-6. **Display behavior.** Choose Collage (default) or Latest visitor, detection
-   confidence/cooldown, refresh cadence, quiet hours, and whether waking the
-   TV is allowed.
+6. **Display behavior.** Choose Collage (default) or Latest visitor and
+   detection confidence/cooldown.
 
 Use Settings after setup to change the current-image API access policy,
-appearance preset, regional package catalog, TV matte, and retention settings.
+appearance preset, regional package catalog, and retention settings.
 Changing the active source preserves history but does not merge sources.

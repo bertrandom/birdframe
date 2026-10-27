@@ -1,7 +1,7 @@
 [project]
 name = "birdframe"
 version = "0.1.2"
-description = "Self-hosted bird detection artwork display for Samsung The Frame"
+description = "Self-hosted bird detection artwork display for the Electric Objects EO1"
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.115,<1",
@@ -9,7 +9,6 @@ dependencies = [
   "httpx>=0.27,<1",
   "pillow>=10.4,<12",
   "cryptography>=43,<46",
-  "samsungtvws>=2.7,<4",
 ]
 
 [project.optional-dependencies]

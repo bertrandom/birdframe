@@ -1,7 +1,7 @@
 # Security policy
 
 BirdFrame is a self-hosted hobby project. Please do not publish provider keys,
-Samsung pairing tokens, database files, or screenshots containing secrets in an
+display API tokens, database files, or screenshots containing secrets in an
 issue.
 
 For a suspected vulnerability, contact the repository maintainers privately

@@ -5,20 +5,20 @@ Date: 2026-07-29
 
 ## 1. Purpose
 
-BirdFrame is a self-hosted hobby application that listens for bird detections and turns recent visitors into artwork displayed on a Samsung The Frame TV.
+BirdFrame is a self-hosted hobby application that listens for bird detections and turns recent visitors into artwork displayed on an Electric Objects EO1 picture frame running the custom EO1 firmware.
 
 It supports two detection sources:
 
 1. A local microphone analyzed by BirdNET-Go.
 2. An existing BirdWeather station, requiring no microphone on the BirdFrame host.
 
-The application has a local web interface for first-run setup, health monitoring, artwork management, and TV control. It is installed with Docker Compose on an always-on computer and supports 64-bit Linux on both ARM and x86.
+The application has a local web interface for first-run setup, health monitoring, artwork management, and EO1 control. It is installed with Docker Compose on an always-on computer and supports 64-bit Linux on both ARM and x86.
 
 ## 2. Product goals
 
 - Detect local birds continuously without sending microphone audio to an image-generation provider.
-- Display either an evolving 16:9 bird collage or a full-screen latest-visitor composition on a Samsung Frame TV; the collage is the default.
-- Serve the exact current display image through a stable HTTP API so other TVs, dashboards, and applications can use the same backend.
+- Display either an evolving bird collage or a full-screen latest-visitor composition on an EO1, in portrait (1080 × 1920, the default) or landscape (1920 × 1080); the collage is the default.
+- Serve the exact current display image through a stable HTTP API so other displays, dashboards, and applications can use the same backend.
 - Make initial setup possible from a browser without editing configuration files.
 - Let the user use a local microphone or an existing BirdWeather station.
 - Let the user select a geographic location used for detection filtering and regional art preparation.
@@ -26,13 +26,13 @@ The application has a local web interface for first-run setup, health monitoring
 - Let the user generate regional artwork or install a pre-generated regional package.
 - Avoid bundling optional model weights in the BirdFrame application image.
 - Keep deployment and maintenance appropriate for a hobby project.
-- Persist settings, artwork, detections, and Samsung pairing tokens across container upgrades.
+- Persist settings, artwork, detections, and secrets across container upgrades.
 - Keep the project in git and provide enough documentation for another hobbyist to install and troubleshoot it.
 
 ## 3. Non-goals for the first release
 
 - Scientific-grade verification of detections.
-- Native discovery or remote control for televisions other than Samsung Frame models. Other displays consume the generic current-image API.
+- Native control of displays other than the EO1 with the custom firmware. Other displays consume the generic current-image API.
 - Running on Windows or macOS as a production microphone host.
 - Remote access over the public internet.
 - A hosted BirdFrame cloud service.
@@ -58,12 +58,11 @@ The first visit opens a resumable wizard:
    - Choose Local microphone or BirdWeather.
    - Local microphone: list devices reported by BirdNET-Go, test live input, choose device, set confidence threshold, and show model status.
    - BirdWeather: enter a station token, test it, show station name/location and latest detection, then save it securely.
-4. **Samsung Frame**
-   - Discover compatible TVs on the LAN.
-   - Show name, model, IP address, resolution, and Art Mode support when available.
-   - Allow manual IP and optional MAC address entry.
-   - Pair and ask the user to approve BirdFrame on the TV.
-   - Upload and display a generated test image, then remove only that test image.
+4. **EO1 & display**
+   - Enter the EO1 hostname, `host:port`, or URL; the port defaults to 12345.
+   - Enter BirdFrame's address as seen from the EO1 (not localhost), prefilled from the browser address unless that is a loopback address.
+   - Choose Portrait (1080 × 1920) or Landscape (1920 × 1080) orientation.
+   - Configure the collage window, the minimum minutes between EO1 updates, quiet hours, and whether new artwork is pushed automatically.
 5. **Artwork**
    - Choose a pre-generated regional package or configure OpenRouter.
    - OpenRouter: enter/test key, fetch compatible image models and capabilities, choose model, quality, and budget guardrail.
@@ -72,7 +71,7 @@ The first visit opens a resumable wizard:
    - Preview the AvianVisitors-inspired kachō-e style and start a resumable background generation job.
 6. **Display behavior**
    - Choose Collage or Latest visitor; Collage is the default.
-   - Configure the collage time window, minimum detection confidence, duplicate cooldown, refresh cadence, quiet hours, and whether BirdFrame may wake the TV.
+   - Configure the collage time window, minimum detection confidence, and duplicate cooldown.
 7. **Review**
    - Show connection health and configuration summary.
    - Start monitoring.
@@ -83,11 +82,11 @@ Secrets are never returned to the browser after being saved. The UI shows only w
 
 The dashboard shows:
 
-- Current TV artwork and the birds represented in it.
+- Current artwork and the birds represented in it.
 - Latest detections with species, time, confidence, and source.
-- State of BirdNET-Go or BirdWeather, the TV, and the artwork library.
+- State of BirdNET-Go or BirdWeather, the EO1, and the artwork library.
 - Pending image generation/package download jobs and estimated/recorded cost where the provider reports it.
-- Controls to pause TV updates, refresh now, regenerate the composition, and retry failed operations.
+- Controls to send the current art to the EO1, refresh now, regenerate the composition, and retry failed operations.
 - A link to advanced BirdNET-Go administration for model and microphone diagnostics.
 
 ### 4.3 Settings
@@ -96,7 +95,7 @@ The dashboard shows:
 - Detection source and confidence/cooldown policy.
 - BirdNET-Go connection and optional-model status.
 - BirdWeather token and polling interval.
-- TV discovery, pairing, test, matte, wake, and quiet-hour behavior.
+- EO1 host, BirdFrame address for the EO1, orientation, update interval, automatic updates, and quiet hours.
 - OpenRouter credentials, model, supported generation options, concurrency, and spend limits.
 - Regional generation controls: occurrence provider, season, probability threshold, maximum species, manual includes/excludes, and estimated cost.
 - Artwork appearance: built-in kachō-e preset, paper tone, palette, density, pose mix, labels, custom prompt addendum, installed packages, jobs, and storage use.
@@ -113,15 +112,15 @@ Version 1 supports both display modes and uses the same reviewed species assets 
 The default is an evolving collage closely inspired by AvianVisitors:
 
 - Each species has two transparent illustrations: perched and in flight.
-- A 3840 × 2160 sRGB master canvas is rendered locally.
+- An sRGB canvas is rendered locally at the configured output size (1080 × 1920 portrait by default, or 1920 × 1080 landscape).
 - The collage contains unique species from a configurable time window. Presets are 1 hour, 12 hours, 24 hours, 7 days, and all retained detections; the default is 24 hours.
 - Detection count controls relative bird area. Confidence and recency may be optional secondary weights, but count is the default.
 - Repeated detections increase a species' prominence rather than adding unlimited copies.
 - The selected pose is stable for a composition revision and can be overridden per species.
-- The renderer respects a configurable safe area so the TV bezel or matte does not obscure birds.
-- The final upload and API image are the same high-quality JPEG at exactly 3840 × 2160. A 1920 × 1080 profile is available for Frame models that report Full HD.
+- The renderer respects a configurable safe area so the frame's bezel does not obscure birds.
+- The image pushed to the EO1 and the API image are the same high-quality JPEG at exactly the configured output size.
 
-The web version of the collage supports silhouette-accurate hover/click selection, pose switching, species details, and recent detection information. The TV image is art-first and has no text by default; labels are an optional appearance setting.
+The web version of the collage supports silhouette-accurate hover/click selection, pose switching, species details, and recent detection information. The EO1 image is art-first and has no text by default; labels are an optional appearance setting.
 
 ### 5.2 Collage layout algorithm
 
@@ -151,13 +150,13 @@ The packing algorithm must be deterministic for the same inputs and seed. Adding
 
 ### 5.3 Latest-visitor mode
 
-Latest-visitor mode renders the most recent qualifying species as a single large 16:9 composition using its approved perched or flight asset, the same warm-paper background, and the same palette. It does not incur a new paid image-generation request for each detection.
+Latest-visitor mode renders the most recent qualifying species as a single large composition using its approved perched or flight asset, the same warm-paper background, and the same palette. It does not incur a new paid image-generation request for each detection.
 
 Optional labels can show common name, scientific name, detection time, and confidence. They are off by default to preserve the AvianVisitors art style.
 
 ### 5.4 Refresh behavior
 
-The composition is regenerated after a qualifying detection. Samsung uploads are rate-limited and coalesced; the proposed default is no more than one upload every five minutes. Wake-on-LAN, quiet hours, upload interval, and retry behavior are configurable in the web interface. Automatic wake is explicitly chosen during setup rather than silently enabled.
+The composition is regenerated after a qualifying detection. EO1 pushes are rate-limited and coalesced; the default is no more than one push every five minutes (configurable from 1 to 1440 minutes). Automatic updates and quiet hours are configurable in the web interface; no automatic pushes happen during quiet hours because a push wakes the EO1's screen.
 
 ## 6. Bird detection architecture
 
@@ -171,7 +170,7 @@ Reasons:
 - It exposes a real-time Server-Sent Events stream at `GET /api/v2/detections/stream`.
 - Its current default BirdNET v2.4 model is embedded upstream, so BirdFrame does not need to copy or redistribute model files in its own image.
 - Its model gallery can install optional models after deployment.
-- It isolates CPU-intensive, failure-prone audio inference from TV and artwork orchestration.
+- It isolates CPU-intensive, failure-prone audio inference from display and artwork orchestration.
 
 BirdFrame consumes BirdNET-Go's SSE stream and maps each event to a canonical detection record:
 
@@ -224,7 +223,7 @@ BirdWeather is an alternative detection adapter:
 - BirdWeather audio is not downloaded by default.
 - The token is encrypted at rest and redacted from logs.
 
-The canonical detection pipeline after ingestion is identical to local BirdNET-Go events. Switching sources therefore does not invalidate artwork, history, or TV settings.
+The canonical detection pipeline after ingestion is identical to local BirdNET-Go events. Switching sources therefore does not invalidate artwork, history, or display settings.
 
 The first release allows exactly one active source at a time. Source switching is explicit and preserves history, but BirdFrame does not merge simultaneous microphone and BirdWeather streams.
 
@@ -270,7 +269,7 @@ The pipeline independently reimplements the useful parts of AvianVisitors while 
 7. Crop, normalize, and validate the transparent asset.
 8. Optionally run visual/anatomy verification through a user-selected vision model; do not silently incur this cost.
 9. Store the source asset, normalized asset, prompt hash, model/provider, generation parameters, cost, and provenance.
-10. Compose normalized bird assets locally into the exact TV output profile.
+10. Compose normalized bird assets locally into the exact configured output size.
 
 AvianVisitors' useful techniques to preserve are anatomy references, optional look-alike anti-references, style references, per-species diagnostic notes, paired poses, consistent removable backgrounds, post-generation verification, compact silhouette masks, and count-weighted packing. BirdFrame reimplements these ideas and does not copy AvianVisitors code or bundled artwork unless that is later reviewed and attributed separately.
 
@@ -315,7 +314,7 @@ The UI always offers “Reset to AvianVisitors-inspired default.” Completely r
 - Require explicit confirmation showing species count and an estimated upper cost before starting a regional batch.
 - Support pause, resume, per-species retry, cancellation between requests, and export.
 
-Bird assets may be generated square or portrait for better subject detail; the **delivered TV/API artwork is always composed at 16:9**. Both display modes normally reuse approved cutouts rather than generating a paid 16:9 image on every detection.
+Bird assets may be generated square or portrait for better subject detail; the **delivered EO1/API artwork is always composed at the configured output size**. Both display modes normally reuse approved cutouts rather than generating a paid full-size image on every detection.
 
 ### 9.4 Quality checks
 
@@ -328,14 +327,14 @@ Automated checks:
 - Plausible non-empty bounding box.
 - Anatomy audit, with particular attention to extra wings, detached feet, watermarks, stray perches, and incorrect look-alike markings.
 - File-size and package limits.
-- Exact 16:9 final dimensions.
+- Exact configured final dimensions.
 
 Manual UI review:
 
 - Approve/reject/regenerate each species.
 - Compare alternate poses.
 - Edit per-species generation notes.
-- Preview the complete TV composition.
+- Preview the complete composition.
 
 ## 10. Pre-generated artwork packages
 
@@ -373,62 +372,61 @@ Install behavior:
 
 The UI also exports locally generated art in the same format so users can contribute packages without exposing API keys.
 
-## 11. Samsung Frame integration
+## 11. Electric Objects EO1 integration
 
-Use `samsungtvws` (`xchwarze/samsung-tv-ws-api`) from the Python backend.
+The EO1 runs the custom [EO1 firmware](https://github.com/bertrandom/EO1), which serves an HTTP API on port 12345. BirdFrame talks to it with a small HTTP client; no vendor library is needed.
 
-### 11.1 Discovery and pairing
+### 11.1 Configuration
 
-- Discover Samsung TVs through LAN discovery where available, then query `http://<ip>:8001/api/v2/`.
-- Prefer devices that report Frame/Art Mode support.
-- Always provide manual IP entry because multicast discovery is unreliable across Docker, VLANs, and some routers.
-- Require the TV and BirdFrame host to be on the same subnet unless the user has deliberately configured a supported proxy/NAT arrangement.
-- Persist the Samsung authorization token in the BirdFrame data volume.
-- Test Art Mode support before completing setup.
+- `eo1_host`: hostname, `host:port`, or URL of the EO1. The port defaults to 12345.
+- `birdframe_url`: BirdFrame's address as seen from the EO1, for example `http://192.168.1.20:8765`. Loopback addresses do not work because the frame downloads the image itself. The Setup page prefills it from the browser address unless that is a loopback address.
+- Use plain `http://` for `birdframe_url`: the EO1 runs Android 4.4, which cannot validate modern certificate chains such as Let's Encrypt.
+- `output_width` / `output_height` default to 1080 × 1920 (portrait), matching the EO1 panel. Setup offers Portrait (1080 × 1920) or Landscape (1920 × 1080).
+- `display_update_minutes` (1–1440, default 5), `display_auto_update_enabled` (default on), and `quiet_hours_start` / `quiet_hours_end` (`HH:MM`, location timezone).
 
-Linux host networking is recommended for the BirdFrame service because it improves LAN discovery and Wake-on-LAN behavior. The security documentation must explain that host networking exposes the configured web port directly on the LAN.
+Older `tv_*` settings are migrated on startup: `tv_update_minutes`, `tv_auto_update_enabled`, and `tv_quiet_hours_*` become `display_update_minutes`, `display_auto_update_enabled`, and `quiet_hours_*`; `tv_host`, `tv_mac`, `tv_matte`, `tv_wake_enabled`, and `samsung_token` are deleted.
 
-### 11.2 Upload lifecycle
+Linux host networking is recommended for the BirdFrame service because the EO1 must reach BirdFrame at the host's LAN address, and host networking keeps that simple. The security documentation must explain that host networking exposes the configured web port directly on the LAN.
+
+### 11.2 Push lifecycle
 
 For every update:
 
-1. Render the exact output profile, normally 3840 × 2160 sRGB JPEG.
-2. Connect with a bounded timeout.
-3. Optionally wake the TV if permitted and outside quiet hours.
-4. Upload with the configured matte, proposed default `none`.
-5. Select the returned content ID and confirm it became current.
-6. Record the content ID as BirdFrame-owned.
-7. Delete the previous BirdFrame-owned upload only after the new image succeeds.
+1. Render the exact output profile as an sRGB JPEG.
+2. Build the image URL `{birdframe_url}/api/v1/display/compositions/{revision}.jpg`. The URL is immutable per revision, so the frame may cache it; it is served by the display API, and `?token=...` is appended when the display API requires a token.
+3. Call `POST http://<eo1>:12345/api/v1/show` with `{"url": "<image url>", "type": "image"}` and a bounded timeout.
+4. The frame downloads the image and pauses its own playlist slideshow while showing it.
+5. Record the push in the `display_pushes` table.
 
-BirdFrame never deletes content it did not upload and track. Failed uploads are retried with backoff. Coalescing ensures that a burst of detections produces only the newest composition.
+A background worker checks every 30 seconds and pushes the newest composition when it differs from the last push, the update interval has elapsed, it is not quiet hours, and automatic updates are enabled. Coalescing ensures that a burst of detections produces only the newest composition.
+
+The dashboard's **Send current art to EO1** button calls `POST /api/v1/eo1/push` (authenticated). It returns `202` with the ID of an `eo1_push` job and does not wait for the frame.
 
 ### 11.3 Known compatibility risk
 
-Art Mode is an unofficial/private TV interface whose behavior has changed with Samsung firmware and model years. The app must:
+The EO1 is discontinued hardware running community firmware on Android 4.4. The app must:
 
-- Show the exact failing operation and TV-reported information.
-- Provide a connection diagnostic export.
-- Allow upload/select/delete operations to be tested separately.
-- Document same-subnet and TV permission settings.
-- Maintain a tested-model compatibility table based on user reports.
-
-No guarantee of support for every Frame model or firmware should be made.
+- Show the exact failing operation and the frame's error.
+- Log each push with the EO1 address and composition revision.
+- Document the `birdframe_url` reachability requirement, the plain-HTTP requirement, and the `GET /api/v1/state` check for an unreachable frame.
 
 ## 12. Current-image API
 
-BirdFrame exposes the exact image bytes used for the most recent successful or pending Samsung display update. This makes the compositor independent of any one display vendor.
+BirdFrame exposes the exact image bytes used for the most recent successful or pending EO1 update. This makes the compositor independent of any one display vendor.
 
 ### 12.1 Endpoints
 
 - `GET /api/v1/display/current.jpg`
-  - Returns the exact JPEG artifact selected for Samsung upload, without recomposition or transcoding.
-  - Returns a built-in 16:9 waiting/setup image until the first composition exists.
+  - Returns the exact JPEG artifact selected for the EO1, without recomposition or transcoding.
+  - Returns a built-in waiting/setup image until the first composition exists.
   - Sends `Content-Type: image/jpeg`, `ETag`, `Last-Modified`, dimensions, composition ID, and cache revalidation headers.
   - Supports `HEAD` and conditional requests using `If-None-Match` and `If-Modified-Since`.
 - `GET /api/v1/display/current.json`
   - Returns composition ID, revision, creation time, display mode, dimensions, image URL, ETag, and represented species/detection summary.
 - `GET /api/v1/display/events`
   - Optional SSE stream announcing a new composition revision so capable displays can refresh immediately without aggressive polling.
+- `GET /api/v1/display/compositions/{revision}.jpg`
+  - Returns one revision's JPEG with immutable cache headers. This is the URL given to the EO1.
 
 The image endpoint always remains at a stable URL. Clients should use the ETag or metadata revision rather than cache-busting query strings.
 
@@ -441,11 +439,11 @@ Read-only LAN access to the image is enabled by default so smart displays and da
 - Choose whether JSON metadata includes exact timestamps and confidence.
 - Restrict access to configured private subnets.
 
-API credentials are distinct from OpenRouter, BirdWeather, Samsung, and administrator credentials. The API never exposes those secrets, microphone audio, or internal file paths.
+API credentials are distinct from OpenRouter, BirdWeather, and administrator credentials. The API never exposes those secrets, microphone audio, or internal file paths.
 
 ### 12.3 Output consistency
 
-Composition is an immutable stored artifact. The database revision, web preview, current-image API, and Samsung upload job all reference the same file and SHA-256 digest. A later display failure does not cause the API and TV renderer to diverge; status records which revision the TV last confirmed.
+Composition is an immutable stored artifact. The database revision, web preview, current-image API, and EO1 push all reference the same file and SHA-256 digest. A later display failure does not cause the API and the EO1 to diverge; `display_pushes` records which revision was last pushed to the EO1.
 
 ## 13. Proposed implementation
 
@@ -458,15 +456,15 @@ Browser
 BirdFrame web/application service
   |-- SQLite + encrypted secrets
   |-- job runner
-  |-- 16:9 compositor
+  |-- compositor
   |-- current-image HTTP API
-  |-- Samsung Art Mode client
+  |-- EO1 HTTP client
   |-- OpenRouter client
   |-- BirdWeather polling adapter
   |
   +---- BirdNET-Go SSE adapter ----> BirdNET-Go service ----> microphone
   |
-  +---- LAN -----------------------> Samsung Frame TV
+  +---- LAN -----------------------> EO1 (pulls image from BirdFrame)
 ```
 
 Recommended stack:
@@ -474,7 +472,7 @@ Recommended stack:
 - Python 3.12.
 - FastAPI backend with async I/O.
 - SQLAlchemy/Alembic and SQLite in WAL mode.
-- `samsungtvws` for TV control.
+- `httpx` for EO1 control.
 - Pillow, with an optional faster image backend only if needed.
 - React + TypeScript + Vite frontend, compiled into the Python image.
 - A database-backed in-process job queue for the first release. Jobs resume safely after restart.
@@ -489,7 +487,6 @@ One mounted `/data` volume contains:
 ```text
 /data/birdframe.db
 /data/secret.key
-/data/samsung-token
 /data/art/
 /data/packages/
 /data/generated/
@@ -507,8 +504,8 @@ Microphone clips and BirdNET-Go's database remain in BirdNET-Go's own volume.
 - `species`: taxonomy/name resolution and region lists.
 - `art/generation`: OpenRouter model discovery and generation jobs.
 - `art/packages`: catalog, validation, install, export.
-- `art/compositor`: silhouette-aware deterministic 16:9 collage and latest-visitor layouts.
-- `tv/samsung`: discovery, pairing, upload lifecycle, and diagnostics.
+- `art/compositor`: silhouette-aware deterministic collage and latest-visitor layouts.
+- `eo1`: EO1 client, push lifecycle, and diagnostics.
 - `display`: immutable composition revisions and the current-image API.
 - `settings`: validated configuration and encrypted secrets.
 - `api`: browser API and server-sent status/job updates.
@@ -534,7 +531,7 @@ Compose responsibilities:
 - Map `/dev/snd` into BirdNET-Go only for local-microphone mode.
 - Mount separate persistent volumes.
 - Configure timezone and UID/GID.
-- Use host networking where required for TV discovery/Wake-on-LAN and document the trade-off.
+- Use host networking so the EO1 can reach BirdFrame at the host's LAN address, and document the trade-off.
 - Add health checks and restart policies.
 - Expose only the BirdFrame web UI by default; BirdNET-Go's UI can be optionally exposed to the LAN for advanced administration.
 
@@ -552,13 +549,13 @@ Installation should be:
 - Provide optional local authentication if remote LAN users are a concern.
 - Generate a random installation secret on first start.
 - Encrypt OpenRouter, BirdWeather, eBird, and current-image API tokens at rest with that installation secret.
-- Redact tokens, Samsung pairing data, coordinates, and signed URLs from logs and support bundles.
+- Redact tokens, coordinates, and signed URLs from logs and support bundles.
 - Apply SSRF protection to user-entered endpoints: BirdNET-Go may be a configured private address, but arbitrary schemes and public redirects are rejected.
 - Enforce archive download size, extraction size, checksums, safe paths, and file allowlists.
 - Never send microphone audio or BirdWeather soundscapes to OpenRouter.
 - Show external data flows before enabling them.
 - Use CSRF protection and secure cookie settings for state-changing browser actions.
-- Rate-limit pairing, connection tests, generation, and package operations.
+- Rate-limit connection tests, generation, and package operations.
 - Give the current-image API separate read-only access controls and never accept state-changing operations through it.
 
 ## 16. Documentation and quality bar
@@ -570,8 +567,8 @@ Documentation:
 - `docs/setup.md`: wizard choices and configuration.
 - `docs/microphone.md`: device selection and audio troubleshooting.
 - `docs/birdweather.md`: station setup, token, polling, and privacy.
-- `docs/samsung-frame.md`: pairing, supported behavior, firmware caveats, and diagnostics.
-- `docs/display-api.md`: embedding the current image in other TVs, dashboards, and applications.
+- `docs/eo1.md`: firmware, settings, push behavior, the `birdframe_url` requirement, and troubleshooting.
+- `docs/display-api.md`: embedding the current image in other displays, dashboards, and applications.
 - `docs/artwork.md`: OpenRouter costs, generation, review, packages, and attribution.
 - `docs/troubleshooting.md`: health checks, logs, backups, and recovery.
 - `docs/development.md`: local development, tests, release process, and architecture.
@@ -581,12 +578,12 @@ Minimum verification:
 
 - Unit tests for source normalization, deduplication, policies, package safety, layout, and secret redaction.
 - Contract tests using recorded/synthetic BirdNET-Go SSE and BirdWeather responses.
-- A fake Samsung Art Mode server for pairing/upload/select/delete failure cases.
+- A fake EO1 API for push success and failure cases.
 - Golden-image tests asserting exact output dimensions and stable deterministic layouts.
-- API tests asserting that the served image digest is byte-for-byte identical to the Samsung upload artifact.
+- API tests asserting that the served image digest is byte-for-byte identical to the artifact pushed to the EO1.
 - Browser tests for first-run setup and key failure/retry paths.
 - Multi-architecture container build in CI.
-- Manual hardware acceptance test on at least one Frame TV before calling a release stable.
+- Manual hardware acceptance test on at least one EO1 running the custom firmware before calling a release stable.
 
 ## 17. Resolved decisions and implementation defaults
 
@@ -597,33 +594,32 @@ Minimum verification:
 - BirdFrame is inspired by and independently reimplements the AvianVisitors image and collage techniques.
 - “Birdwatch model” means BirdNET. Its default model comes from the upstream BirdNET-Go distribution rather than BirdFrame.
 - Exactly one detection source is active at a time.
-- Wake-on-LAN is supported and configurable. It is an explicit setup choice; quiet hours and upload cadence are configurable.
+- Automatic EO1 updates are on by default and can be turned off; quiet hours and update cadence are configurable.
 - Regional pre-generation exposes probability/frequency threshold, maximum species, season, manual list editing, and cost review.
 - The visual default closely follows AvianVisitors' kachō-e artwork. Appearance options are constrained presets with an advanced prompt addendum.
-- The TV image is art-only by default. Interactive species information remains in the web UI, with labels available as an option.
+- The EO1 image is art-only by default. Interactive species information remains in the web UI, with labels available as an option.
 - The package catalog/repository is configurable in Settings.
 - The exact current display image is available through a generic read-only HTTP API.
 
-One deployment fact still needs confirmation during installation rather than product design: local microphone and automatic TV discovery are supported as production paths on Linux. A BirdWeather-only installation may run elsewhere if container networking is sufficient, but Docker Desktop is not a guaranteed hardware-control target.
+One deployment fact still needs confirmation during installation rather than product design: local microphone capture is supported as a production path on Linux. A BirdWeather-only installation may run elsewhere if container networking is sufficient, but Docker Desktop is not a guaranteed hardware-control target.
 
 ## 18. Acceptance criteria for version 1
 
 - A fresh supported Linux machine can start BirdFrame alone for BirdWeather, or BirdFrame plus BirdNET-Go through the `local-audio` Compose profile.
 - The setup wizard can configure either a USB microphone or a BirdWeather token.
 - A synthetic or real qualifying detection appears in the BirdFrame history exactly once.
-- The user can discover or manually configure a Frame TV, pair it, and pass an upload test.
+- The user can configure an EO1 host and BirdFrame address and push the current artwork to the frame.
 - The user can install a checksum-verified regional package from the configured GitHub catalog.
 - The user can select an occurrence source, probability/frequency threshold, season, and maximum species; review the exact ranked list and cost before generation.
 - The user can configure OpenRouter, select a currently compatible image model, generate one species asset, approve it, and include it in a composition.
 - Collage mode uses two-pose transparent assets, mask-aware collision, normalized count-weighted sizing, horizontal center-out packing, and safe-viewport repacking.
-- Both Collage and Latest visitor produce an exact 16:9 immutable composition.
-- Every uploaded image has the exact detected TV output size and 16:9 aspect ratio.
-- `GET /api/v1/display/current.jpg` serves bytes with the same digest as the composition selected for Samsung upload.
-- Detection bursts are coalesced and respect quiet hours and upload limits.
-- BirdFrame deletes only content IDs that it previously uploaded and recorded.
-- Restarting/upgrading containers preserves settings, secrets, artwork, detection cursor, jobs, and Samsung pairing.
-- No API key, station token, exact coordinate, or Samsung token appears in normal logs or a support bundle.
-- The documentation covers installation, setup, upgrades, backup, and the major known Samsung compatibility limitations.
+- Both Collage and Latest visitor produce an immutable composition at the exact configured output size.
+- Every pushed image has the exact configured output size (1080 × 1920 or 1920 × 1080).
+- `GET /api/v1/display/current.jpg` serves bytes with the same digest as the composition pushed to the EO1.
+- Detection bursts are coalesced and respect quiet hours and the update interval.
+- Restarting/upgrading containers preserves settings, secrets, artwork, detection cursor, jobs, and EO1 settings.
+- No API key, station token, or exact coordinate appears in normal logs or a support bundle.
+- The documentation covers installation, setup, upgrades, backup, and the major known EO1 limitations (reachability of `birdframe_url`, plain HTTP on Android 4.4).
 
 ## 19. Research basis
 
@@ -636,6 +632,5 @@ One deployment fact still needs confirmation during installation rather than pro
 - [AvianVisitors repository](https://github.com/Twarner491/AvianVisitors)
 - [AvianVisitors illustration pipeline](https://github.com/Twarner491/AvianVisitors/blob/avian-visitors/avian/scripts/README.md)
 - [AvianVisitors project explanation: illustrations, collage, and real-time behavior](https://theodore.net/projects/AvianVisitors/#illustrations-collage)
-- [Samsung TV WebSocket API library](https://github.com/xchwarze/samsung-tv-ws-api)
+- [EO1 custom firmware and HTTP API](https://github.com/bertrandom/EO1)
 - [OpenRouter image generation API](https://openrouter.ai/docs/guides/overview/multimodal/image-generation)
-- [Samsung Art Mode user documentation](https://www.samsung.com/us/support/answer/ANS10005224/)

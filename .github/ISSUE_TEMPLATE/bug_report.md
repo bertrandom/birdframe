@@ -13,7 +13,7 @@ labels: bug
 - Docker image or local checkout:
 - Host OS and architecture:
 - Detection source (BirdWeather or BirdNET-Go):
-- Samsung model (if relevant):
+- EO1 firmware version (if relevant):
 
 ## Reproduction and logs
 
