@@ -56,7 +56,7 @@ docker run -d --name birdframe --restart unless-stopped \
   -p 8765:8765 \
   -v "$PWD/data:/data" \
   -e TZ=Europe/Oslo \
-  ghcr.io/simenf/birdframe:latest
+  ghcr.io/bertrandom/birdframe:latest
 ```
 
 Open `http://HOSTNAME-OR-IP:8765` create a user and complete the setup wizard. The default
@@ -66,11 +66,11 @@ Prefer to build from source (for development or customization)? Use Docker
 Compose:
 
 ```sh
-git clone https://github.com/simenf/birdframe.git
+git clone https://github.com/bertrandom/birdframe.git
 cd birdframe
 cp .env.example .env
 mkdir -p data birdnet-go-data
-docker compose up -d
+docker compose up -d --build
 ```
 
 The first visitor creates the administrator account; every later visitor signs

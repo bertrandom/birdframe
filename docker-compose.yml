@@ -9,9 +9,9 @@
 # Host networking is not supported on Docker Desktop.
 services:
   birdframe:
-    image: ghcr.io/simenf/birdframe:${BIRDFRAME_VERSION:-0.1.2}
-    # Building locally makes the repository installable before a registry
-    # release exists; Compose still tags the result with the image above.
+    image: ghcr.io/bertrandom/birdframe:${BIRDFRAME_VERSION:-latest}
+    # `docker compose pull` fetches the published image; `docker compose build`
+    # builds this checkout instead and tags it with the image above.
     build: .
     container_name: birdframe
     restart: unless-stopped

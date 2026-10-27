@@ -1,7 +1,9 @@
 # syntax=docker/dockerfile:1
 # Build context is the repository root. The backend exposes `birdframe.main:app`
 # from backend/birdframe; its React UI is compiled from frontend/.
-FROM node:22-bookworm-slim AS frontend-build
+# The UI build only emits static files, so run it on the build machine's own
+# platform rather than emulating each target architecture.
+FROM --platform=$BUILDPLATFORM node:22-bookworm-slim AS frontend-build
 WORKDIR /src/frontend
 COPY frontend/package*.json ./
 # npm 10 in the Node 22 image correctly resolves optional native Rollup

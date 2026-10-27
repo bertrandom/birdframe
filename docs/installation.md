@@ -15,7 +15,7 @@ docker run -d --name birdframe --restart unless-stopped \
   -p 8765:8765 \
   -v ~/birdframe/data:/data \
   -e TZ=Europe/Oslo \
-  ghcr.io/simenf/birdframe:latest
+  ghcr.io/bertrandom/birdframe:latest
 ```
 
 Open `http://HOST_IP:8765` and complete the setup wizard. The `-v` bind mount
@@ -24,13 +24,13 @@ survive image updates. To update, pull the new image and recreate the
 container:
 
 ```sh
-docker pull ghcr.io/simenf/birdframe:latest
+docker pull ghcr.io/bertrandom/birdframe:latest
 docker rm -f birdframe
 docker run -d --name birdframe --restart unless-stopped \
   -p 8765:8765 \
   -v ~/birdframe/data:/data \
   -e TZ=Europe/Oslo \
-  ghcr.io/simenf/birdframe:latest
+  ghcr.io/bertrandom/birdframe:latest
 ```
 
 To keep BirdFrame simply reachable from the EO1 at the host's LAN address,
@@ -110,7 +110,7 @@ Save this as `docker-compose.yml` and run `docker compose up -d`:
 ```yaml
 services:
   birdframe:
-    image: ghcr.io/simenf/birdframe:latest
+    image: ghcr.io/bertrandom/birdframe:latest
     container_name: birdframe
     restart: unless-stopped
     network_mode: host
