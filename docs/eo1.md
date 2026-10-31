@@ -37,6 +37,20 @@ and automatic updates are on. A burst of detections therefore results in at
 most one push per interval. Every push is recorded in the `display_pushes`
 table.
 
+### Visitor spotlight
+
+With **Spotlight each detected bird** on, the Collage and Field journal
+layouts briefly hand the frame to each qualifying detection, one that passes
+the confidence threshold and the duplicate cooldown. BirdFrame renders the
+bird on its own with "Bird detected" and its English detection name, and sends
+it to the EO1 straight away, without waiting for the update interval. Each
+new qualifying detection replaces the bird and restarts the timer, which runs
+from the detection's time. A repeat of the bird already on screen extends the
+timer without sending the image again. When the timer runs out, the collage is
+re-rendered and sent straight away as well. Quiet hours still apply. The
+spotlight is kept in memory, so after a restart BirdFrame goes back to the
+collage. The Latest visitor layout ignores the setting.
+
 To push by hand, use **Send current art to EO1** on the dashboard. It calls
 `POST /api/v1/eo1/push`, which queues an `eo1_push` job and returns `202` with
 the job ID. Manual pushes ignore quiet hours and the auto-update switch.
@@ -53,6 +67,8 @@ All of these are in the Setup guide's **EO1 & display** step.
 | `display_update_minutes` | Update the EO1 at most every | 1–1440 minutes, default 5. |
 | `quiet_hours_start` / `quiet_hours_end` | Quiet hours start / end | `HH:MM` in the location timezone chosen in setup. |
 | `display_auto_update_enabled` | Automatically show new artwork on the EO1 | On by default. Turn off to push only by hand. |
+| `visitor_spotlight_enabled` | Spotlight each detected bird | Off by default. See [Visitor spotlight](#visitor-spotlight). |
+| `visitor_spotlight_minutes` | Spotlight duration | 1–120 minutes, default 5. |
 
 ### BirdFrame address
 

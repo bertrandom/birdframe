@@ -29,7 +29,7 @@ from .adapters import (AdapterError, BirdNETGoClient, BirdWeatherClient, EO1Clie
                        ProviderUnavailable, PublicBirdWeatherClient)
 from .auth import api_key_prefix, generate_api_key, hash_api_key, hash_password
 from .compositor import (SpeciesCount, collage_image, group_detections, journal_image,
-                         latest_visitor_image, load_species_asset, species_has_asset)
+                         latest_visitor_image, load_species_asset, species_has_asset, spotlight_image)
 from .packages import MAX_ARCHIVE_BYTES, PackageError, SAFE_ID, fetch_catalog, install_archive, install_package, install_package_url
 from .schemas import (ApiKeyCreate, ApiKeyCreated, ApiKeyOut, AuthMe, BootstrapRequest, CompositionSummary,
                       Detection, DetectionCreate, JobRequest, LoginRequest, PackageInstallRequest,
@@ -149,6 +149,13 @@ class BirdFrameService:
         self.events: set[asyncio.Queue[int]] = set()
         self.render_lock = asyncio.Lock()
         self.display_lock = asyncio.Lock()
+        # Wakes the display worker so a spotlight reaches the EO1 right away.
+        self.display_wake = asyncio.Event()
+        # The visitor spotlight lives in memory; a restart simply resumes the collage.
+        self.spotlight: SpeciesCount | None = None
+        self.spotlight_at: datetime | None = None
+        self.spotlight_until: datetime | None = None
+        self.spotlight_rendered: SpeciesCount | None = None
         self.source_runtime: dict[str, object] = {
             "state": "starting",
             "last_activity_at": None,
@@ -177,9 +184,58 @@ class BirdFrameService:
             self.source_runtime["state"] = "receiving"
             self.source_runtime["last_detection_at"] = now
 
+    def spotlight_active(self, settings: PublicSettings | None = None) -> bool:
+        settings = settings or self.store.get_settings()
+        return (settings.visitor_spotlight_enabled and settings.display_mode != "latest_visitor"
+                and self.spotlight is not None and self.spotlight_until is not None
+                and datetime.now(UTC) < self.spotlight_until)
+
+    def note_spotlight(self, payload: DetectionCreate) -> None:
+        """Spotlight a qualifying detection, restarting the window from its detection time."""
+        settings = self.store.get_settings()
+        if not settings.visitor_spotlight_enabled or settings.display_mode == "latest_visitor":
+            return
+        now = datetime.now(UTC)
+        detected = min((payload.detected_at or now).astimezone(UTC), now)
+        until = detected + timedelta(minutes=settings.visitor_spotlight_minutes)
+        if until <= now:
+            return  # e.g. history seeded from BirdWeather
+        active = self.spotlight_active(settings)
+        if active and self.spotlight_at and detected < self.spotlight_at:
+            # An older detection from the same batch still extends the window.
+            self.spotlight_until = max(self.spotlight_until or until, until)
+            return
+        self.spotlight = SpeciesCount(common_name=payload.common_name, scientific_name=payload.scientific_name,
+                                      count=1, confidence=payload.confidence, latest_at=detected.isoformat())
+        self.spotlight_at = detected
+        self.spotlight_until = max(self.spotlight_until, until) if active and self.spotlight_until else until
+        self.log("info", f"Spotlighting {payload.common_name} until {self.spotlight_until.astimezone(_settings_timezone(settings)):%H:%M:%S}")
+
+    async def render_after_detection(self) -> dict[str, Any]:
+        """Render for new detections, keeping an unchanged spotlight instead of re-sending it."""
+        current = self.store.current_composition()
+        if (current and current["mode"] == "spotlight" and self.spotlight_active()
+                and self.spotlight_rendered is not None and self.spotlight is not None
+                and (self.spotlight_rendered.scientific_name, self.spotlight_rendered.common_name)
+                == (self.spotlight.scientific_name, self.spotlight.common_name)):
+            return current
+        return await self.render()
+
+    async def expire_spotlight(self) -> None:
+        """Return to the collage once the spotlight window has passed."""
+        current = self.store.current_composition()
+        if current and current["mode"] == "spotlight" and not self.spotlight_active():
+            self.log("info", "Visitor spotlight ended; resuming the collage")
+            await self.render()
+
     async def render(self) -> dict[str, Any]:
         async with self.render_lock:
             settings = self.store.get_settings()
+            previous = self.store.current_composition()
+            if self.spotlight_active(settings):
+                assert self.spotlight is not None
+                image, species = spotlight_image(self.spotlight, settings, self.store.art_dir)
+                return self._save_composition("spotlight", image, species, previous, spotlight=self.spotlight)
             if settings.display_mode == "journal":
                 # The journal counts a real day: everything since local midnight
                 # in the configured timezone, not the configurable collage window.
@@ -195,16 +251,23 @@ class BirdFrameService:
                 image, species = journal_image(grouped, settings, self.store.art_dir)
             else:
                 image, species = collage_image(grouped, settings, self.store.art_dir)
-            temporary = self.store.art_dir / f"composition-{datetime.now(UTC).strftime('%Y%m%dT%H%M%S%f')}.jpg"
-            image.save(temporary, "JPEG", quality=94, subsampling=0, optimize=True)
-            digest = hashlib.sha256(temporary.read_bytes()).hexdigest()
-            identifier = self.store.add_composition(mode=settings.display_mode, width=image.width, height=image.height,
-                                                    path=temporary, sha256=digest, species=species)
-            row = self.store.current_composition()
-            assert row and row["id"] == identifier
-            for queue in list(self.events):
-                queue.put_nowait(row["revision"])
-            return row
+            return self._save_composition(settings.display_mode, image, species, previous)
+
+    def _save_composition(self, mode: str, image: Image.Image, species: list[dict[str, Any]],
+                          previous: dict[str, Any] | None, *, spotlight: SpeciesCount | None = None) -> dict[str, Any]:
+        temporary = self.store.art_dir / f"composition-{datetime.now(UTC).strftime('%Y%m%dT%H%M%S%f')}.jpg"
+        image.save(temporary, "JPEG", quality=94, subsampling=0, optimize=True)
+        digest = hashlib.sha256(temporary.read_bytes()).hexdigest()
+        identifier = self.store.add_composition(mode=mode, width=image.width, height=image.height,
+                                                path=temporary, sha256=digest, species=species)
+        row = self.store.current_composition()
+        assert row and row["id"] == identifier
+        self.spotlight_rendered = spotlight
+        if mode == "spotlight" or (previous and previous["mode"] == "spotlight"):
+            self.display_wake.set()
+        for queue in list(self.events):
+            queue.put_nowait(row["revision"])
+        return row
 
     def display_exclusion_reason(self, payload: DetectionCreate) -> str | None:
         """Explain why a detection will not trigger a display update."""
@@ -226,8 +289,10 @@ class BirdFrameService:
     async def ingest(self, payload: DetectionCreate, *, render: bool = True) -> Detection | None:
         qualifying = self.qualifies_for_display(payload)
         result = self.store.add_detection(payload)
-        if result and render and qualifying:
-            await self.render()
+        if result and qualifying:
+            self.note_spotlight(payload)
+            if render:
+                await self.render_after_detection()
         return result
 
     def composition_url(self, row: dict[str, Any], *, include_token: bool = True) -> str:
@@ -271,7 +336,9 @@ class BirdFrameService:
         previous = self.store.latest_display_push()
         if previous and previous["composition_id"] == row["id"]:
             return
-        if previous:
+        # Showing a spotlight, and leaving one, ignore the update interval.
+        spotlight_change = row["mode"] == "spotlight" or (previous and previous.get("mode") == "spotlight")
+        if previous and not spotlight_change:
             last_push = datetime.fromisoformat(previous["created_at"])
             elapsed = (datetime.now(UTC) - last_push.astimezone(UTC)).total_seconds()
             if elapsed < settings.display_update_minutes * 60:
@@ -387,7 +454,7 @@ async def source_worker(service: BirdFrameService, stop: asyncio.Event) -> None:
                         changed = changed or created is not None
                     await client.aclose()
                     if changed and qualifying:
-                        await service.render()
+                        await service.render_after_detection()
                         service.log("info", "Imported new detections from private BirdWeather station")
                 await pause(settings.birdweather_poll_seconds)
             elif settings.detection_source == "birdweather_public":
@@ -407,7 +474,7 @@ async def source_worker(service: BirdFrameService, stop: asyncio.Event) -> None:
                         changed = changed or created is not None
                     await client.aclose()
                     if changed and qualifying:
-                        await service.render()
+                        await service.render_after_detection()
                         activity = "Seeded the previous 24 hours" if seeding else "Imported new detections"
                         service.log("info", f"{activity} from public BirdWeather station {settings.birdweather_public_station_id}")
                     elif seeding:
@@ -457,7 +524,7 @@ async def source_worker(service: BirdFrameService, stop: asyncio.Event) -> None:
                         else:
                             service.log("info", f"BirdNET-Go detection accepted for display: {item.common_name} ({confidence:.3f})")
                             try:
-                                await service.render()
+                                await service.render_after_detection()
                             except asyncio.CancelledError:
                                 raise
                             except Exception as exc:
@@ -502,12 +569,19 @@ async def source_worker(service: BirdFrameService, stop: asyncio.Event) -> None:
 async def display_sync_worker(service: BirdFrameService, stop: asyncio.Event) -> None:
     """Send a newly rendered composition to the EO1 once the update interval permits it."""
     while not stop.is_set():
+        service.display_wake.clear()
         try:
+            await service.expire_spotlight()
             await service.sync_display_if_due()
         except (AdapterError, OSError) as exc:
             service.log("warning", f"Automatic EO1 update deferred: {exc}")
+        timeout = 30.0
+        if service.spotlight_until:
+            remaining = (service.spotlight_until - datetime.now(UTC)).total_seconds()
+            if 0 < remaining < timeout:
+                timeout = remaining + 0.5
         try:
-            await asyncio.wait_for(stop.wait(), timeout=30)
+            await asyncio.wait_for(service.display_wake.wait(), timeout=timeout)
         except asyncio.TimeoutError:
             pass
 
@@ -541,7 +615,8 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        if not store.current_composition():
+        current = store.current_composition()
+        if not current or current["mode"] == "spotlight":
             await service.render()
         worker = asyncio.create_task(source_worker(service, stop_sources))
         display_worker = asyncio.create_task(display_sync_worker(service, stop_sources))

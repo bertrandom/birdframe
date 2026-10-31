@@ -677,3 +677,35 @@ def latest_visitor_image(species: list[SpeciesCount], settings: PublicSettings, 
     return canvas, [{"common_name": bird.common_name, "scientific_name": bird.scientific_name, "count": bird.count,
                      "confidence": bird.confidence, "latest_at": bird.latest_at, "x": x, "y": y,
                      "width": asset.width, "height": asset.height}]
+
+
+def spotlight_image(bird: SpeciesCount, settings: PublicSettings, art_dir: Path) -> tuple[Image.Image, list[dict[str, object]]]:
+    """A single just-detected bird with a "Bird detected" heading and its English name."""
+    width, height = settings.output_width, settings.output_height
+    canvas = Image.new("RGB", (width, height), _background_rgb(settings))
+    draw = ImageDraw.Draw(canvas)
+    ink = _ink(settings)
+    unit = min(width, height)
+    heading_y = height * 0.08
+    _draw_tracked(draw, width / 2, heading_y, "BIRD DETECTED", _journal_font(int(unit * 0.034)),
+                  ink.muted, tracking=unit * 0.008)
+    # Shrink long names until they fit the panel width.
+    name_size = int(unit * 0.085)
+    name_font = _journal_font(name_size, italic=True)
+    while name_size > 24 and draw.textlength(bird.common_name, font=name_font) > width * 0.88:
+        name_size = int(name_size * 0.92)
+        name_font = _journal_font(name_size, italic=True)
+    name_y = height * 0.88
+    draw.text((width / 2, name_y), bird.common_name, font=name_font, fill=ink.text, anchor="ms")
+    pose = "perched" if settings.pose_preference == "balanced" else settings.pose_preference
+    asset = load_species_asset(art_dir, bird, pose, settings.palette, settings.asset_pack_id, settings.asset_variant)
+    art_top = heading_y + unit * 0.09
+    art_bottom = name_y - name_size * 1.4
+    ratio = min(width * 0.78 / asset.width, (art_bottom - art_top) / asset.height)
+    asset = asset.resize((max(1, int(asset.width * ratio)), max(1, int(asset.height * ratio))), Image.Resampling.LANCZOS)
+    x = (width - asset.width) // 2
+    y = int(art_top + (art_bottom - art_top - asset.height) / 2)
+    canvas.paste(asset, (x, y), asset)
+    return canvas, [{"common_name": bird.common_name, "scientific_name": bird.scientific_name, "count": bird.count,
+                     "confidence": bird.confidence, "latest_at": bird.latest_at, "x": x, "y": y,
+                     "width": asset.width, "height": asset.height}]

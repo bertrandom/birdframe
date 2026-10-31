@@ -220,3 +220,81 @@ async def test_eo1_url_carries_display_token_when_required(tmp_path, monkeypatch
         result = await app.state.service.push_to_display()
         assert FakeEO1.shown[0][1].endswith("?token=frame-token-0123456789")
         assert "token" not in result["url"]
+
+
+def _current(client: TestClient) -> dict:
+    return client.get("/api/v1/compositions/current").json()
+
+
+def _shown_revisions() -> set[int]:
+    return {int(url.rsplit("/", 1)[1].removesuffix(".jpg")) for _host, url in FakeEO1.shown}
+
+
+@pytest.mark.asyncio
+async def test_visitor_spotlight_shows_each_bird_then_resumes_the_collage(tmp_path, monkeypatch):
+    app = create_app(tmp_path)
+    with TestClient(app) as client:
+        authed(client)
+        monkeypatch.setattr(birdframe_main, "EO1Client", FakeEO1)
+        FakeEO1.shown = []
+        _settings(client, display_update_minutes=30, duplicate_cooldown_minutes=0,
+                  visitor_spotlight_enabled=True, visitor_spotlight_minutes=5, **EO1_SETTINGS)
+        service = app.state.service
+        await service.sync_display_if_due()
+        collage = _current(client)
+        assert collage["mode"] == "collage"
+
+        client.post("/api/v1/detections", json={
+            "common_name": "Common Swift", "scientific_name": "Apus apus",
+            "confidence": 1.0, "source_event_id": "swift-1",
+        })
+        swift = _current(client)
+        assert swift["mode"] == "spotlight"
+        assert [item["common_name"] for item in swift["species"]] == ["Common Swift"]
+        await service.sync_display_if_due()
+        assert swift["revision"] in _shown_revisions()  # ignores the 30-minute interval
+
+        # The same species again only extends the window; nothing new is sent.
+        client.post("/api/v1/detections", json={
+            "common_name": "Common Swift", "scientific_name": "Apus apus",
+            "confidence": 1.0, "source_event_id": "swift-2",
+        })
+        assert _current(client)["revision"] == swift["revision"]
+
+        client.post("/api/v1/detections", json={
+            "common_name": "Eurasian Magpie", "scientific_name": "Pica pica",
+            "confidence": 1.0, "source_event_id": "magpie",
+        })
+        magpie = _current(client)
+        assert magpie["mode"] == "spotlight"
+        assert [item["common_name"] for item in magpie["species"]] == ["Eurasian Magpie"]
+        await service.sync_display_if_due()
+        assert magpie["revision"] in _shown_revisions()
+        assert service.spotlight_until - datetime.now(UTC) > timedelta(minutes=4)
+
+        service.spotlight_until = datetime.now(UTC) - timedelta(seconds=1)
+        await service.expire_spotlight()
+        resumed = _current(client)
+        assert resumed["mode"] == "collage"
+        assert {item["common_name"] for item in resumed["species"]} == {"Common Swift", "Eurasian Magpie"}
+        await service.sync_display_if_due()
+        assert resumed["revision"] in _shown_revisions()
+
+
+def test_visitor_spotlight_ignores_old_detections_and_latest_visitor_mode(tmp_path):
+    app = create_app(tmp_path)
+    with TestClient(app) as client:
+        authed(client)
+        _settings(client, visitor_spotlight_enabled=True, visitor_spotlight_minutes=5)
+        client.post("/api/v1/detections", json={
+            "common_name": "Common Swift", "scientific_name": "Apus apus", "confidence": 1.0,
+            "source_event_id": "old", "detected_at": (datetime.now(UTC) - timedelta(minutes=10)).isoformat(),
+        })
+        assert _current(client)["mode"] == "collage"
+
+        _settings(client, display_mode="latest_visitor")
+        client.post("/api/v1/detections", json={
+            "common_name": "Eurasian Magpie", "scientific_name": "Pica pica",
+            "confidence": 1.0, "source_event_id": "new",
+        })
+        assert _current(client)["mode"] == "latest_visitor"

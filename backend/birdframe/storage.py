@@ -302,7 +302,9 @@ class Store:
 
     def latest_display_push(self) -> dict[str, Any] | None:
         with self.connection() as db:
-            row = db.execute("SELECT composition_id,created_at FROM display_pushes ORDER BY id DESC LIMIT 1").fetchone()
+            row = db.execute("""SELECT p.composition_id, p.created_at, c.mode FROM display_pushes p
+                                LEFT JOIN compositions c ON c.id=p.composition_id
+                                ORDER BY p.id DESC LIMIT 1""").fetchone()
         return dict(row) if row else None
 
     def cleanup(self, *, keep_days: int = 365, log_days: int = 30) -> dict[str, int]:

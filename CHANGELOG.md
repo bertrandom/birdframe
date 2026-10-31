@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+* Added an optional visitor spotlight for the Collage and Field journal
+  layouts: each qualifying detection is shown on its own with "Bird detected"
+  and its English name, sent to the EO1 straight away, and the collage returns
+  after a configurable number of minutes (default 5). Each new detection
+  restarts that timer.
 * Replaced Samsung The Frame delivery with the Electric Objects EO1 running
   the custom EO1 firmware. BirdFrame asks the frame to show
   `/api/v1/display/compositions/{revision}.jpg` through its HTTP API on port

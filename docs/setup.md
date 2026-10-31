@@ -20,8 +20,9 @@ and users.
    another), BirdFrame's address as the EO1 sees it (prefilled from your
    browser unless that is localhost), and the orientation: Portrait
    (1080×1920) or Landscape (1920×1080). Then choose the collage window, how
-   often the EO1 may be updated, quiet hours, and whether new artwork is shown
-   automatically. See [eo1.md](eo1.md).
+   often the EO1 may be updated, quiet hours, whether new artwork is shown
+   automatically, and whether each detected bird is briefly spotlighted on its
+   own. See [eo1.md](eo1.md).
 5. **Artwork.** Install a signed/checksummed package or connect OpenRouter,
    choose an image-capable model, configure a budget, review ranked species and
    estimated maximum cost, then start a resumable job.

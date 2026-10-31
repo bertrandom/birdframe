@@ -28,6 +28,10 @@ class PublicSettings(BaseModel):
     quiet_hours_start: str = ""
     quiet_hours_end: str = ""
     display_update_minutes: int = Field(default=5, ge=1, le=1440)
+    # Collage and journal modes can briefly show each qualifying bird on its
+    # own before returning to the collage.
+    visitor_spotlight_enabled: bool = False
+    visitor_spotlight_minutes: int = Field(default=5, ge=1, le=120)
     # The EO1 panel is 1080x1920 and usually hangs in portrait.
     output_width: int = Field(default=1080, ge=640, le=7680)
     output_height: int = Field(default=1920, ge=360, le=4320)
