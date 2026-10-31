@@ -255,13 +255,13 @@ async def test_visitor_spotlight_shows_each_bird_then_resumes_the_collage(tmp_pa
         assert swift["revision"] in _shown_revisions()  # ignores the 30-minute interval
 
         # The same species again neither restarts the timer nor sends anything.
-        swift_until = service.spotlight_until
+        swift_until = service.spotlight_until()
         client.post("/api/v1/detections", json={
             "common_name": "Common Swift", "scientific_name": "Apus apus",
             "confidence": 1.0, "source_event_id": "swift-2",
         })
         assert _current(client)["revision"] == swift["revision"]
-        assert service.spotlight_until == swift_until
+        assert service.spotlight_until() == swift_until
 
         client.post("/api/v1/detections", json={
             "common_name": "Eurasian Magpie", "scientific_name": "Pica pica",
@@ -272,11 +272,11 @@ async def test_visitor_spotlight_shows_each_bird_then_resumes_the_collage(tmp_pa
         assert [item["common_name"] for item in magpie["species"]] == ["Eurasian Magpie"]
         await service.sync_display_if_due()
         assert magpie["revision"] in _shown_revisions()
-        assert service.spotlight_until - datetime.now(UTC) > timedelta(minutes=4)
+        assert service.spotlight_until() - datetime.now(UTC) > timedelta(minutes=4)
         shown = client.get("/api/v1/display/current.json").json()
-        assert datetime.fromisoformat(shown["spotlight_until"]) == service.spotlight_until
+        assert datetime.fromisoformat(shown["spotlight_until"]) == service.spotlight_until()
 
-        service.spotlight_until = datetime.now(UTC) - timedelta(seconds=1)
+        service.spotlight_at = datetime.now(UTC) - timedelta(minutes=5, seconds=1)
         await service.expire_spotlight()
         resumed = _current(client)
         assert resumed["mode"] == "collage"
@@ -303,3 +303,27 @@ def test_visitor_spotlight_ignores_old_detections_and_latest_visitor_mode(tmp_pa
             "confidence": 1.0, "source_event_id": "new",
         })
         assert _current(client)["mode"] == "latest_visitor"
+
+
+def test_visitor_spotlight_ends_by_the_newest_bird_and_current_duration(tmp_path):
+    app = create_app(tmp_path)
+    with TestClient(app) as client:
+        authed(client)
+        _settings(client, visitor_spotlight_enabled=True, visitor_spotlight_minutes=5)
+        service = app.state.service
+        client.post("/api/v1/detections", json={
+            "common_name": "Common Raven", "scientific_name": "Corvus corax",
+            "confidence": 1.0, "source_event_id": "raven",
+        })
+        raven_until = service.spotlight_until()
+        # Shortening the duration applies to the bird already on screen.
+        _settings(client, visitor_spotlight_minutes=1)
+        assert service.spotlight_until() == raven_until - timedelta(minutes=4)
+        # A later bird ends one duration after its own detection, not with the earlier bird.
+        client.post("/api/v1/detections", json={
+            "common_name": "Cedar Waxwing", "scientific_name": "Bombycilla cedrorum",
+            "confidence": 1.0, "source_event_id": "waxwing",
+        })
+        assert [item["common_name"] for item in _current(client)["species"]] == ["Cedar Waxwing"]
+        assert service.spotlight_until() == service.spotlight_at + timedelta(minutes=1)
+        assert service.spotlight_until() > raven_until - timedelta(minutes=4)

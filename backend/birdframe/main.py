@@ -154,7 +154,6 @@ class BirdFrameService:
         # The visitor spotlight lives in memory; a restart simply resumes the collage.
         self.spotlight: SpeciesCount | None = None
         self.spotlight_at: datetime | None = None
-        self.spotlight_until: datetime | None = None
         self.spotlight_rendered: SpeciesCount | None = None
         self.source_runtime: dict[str, object] = {
             "state": "starting",
@@ -184,11 +183,18 @@ class BirdFrameService:
             self.source_runtime["state"] = "receiving"
             self.source_runtime["last_detection_at"] = now
 
+    def spotlight_until(self, settings: PublicSettings | None = None) -> datetime | None:
+        """When the current spotlight ends, following the duration currently in settings."""
+        if self.spotlight_at is None:
+            return None
+        settings = settings or self.store.get_settings()
+        return self.spotlight_at + timedelta(minutes=settings.visitor_spotlight_minutes)
+
     def spotlight_active(self, settings: PublicSettings | None = None) -> bool:
         settings = settings or self.store.get_settings()
+        until = self.spotlight_until(settings)
         return (settings.visitor_spotlight_enabled and settings.display_mode != "latest_visitor"
-                and self.spotlight is not None and self.spotlight_until is not None
-                and datetime.now(UTC) < self.spotlight_until)
+                and self.spotlight is not None and until is not None and datetime.now(UTC) < until)
 
     def note_spotlight(self, payload: DetectionCreate) -> None:
         """Spotlight a qualifying detection, restarting the window from its detection time."""
@@ -205,14 +211,11 @@ class BirdFrameService:
                                           == (payload.scientific_name or payload.common_name)):
             return  # the bird on screen again leaves its timer alone
         if active and self.spotlight_at and detected < self.spotlight_at:
-            # An older detection from the same batch still extends the window.
-            self.spotlight_until = max(self.spotlight_until or until, until)
-            return
+            return  # an older detection from the same batch; the newest bird stays
         self.spotlight = SpeciesCount(common_name=payload.common_name, scientific_name=payload.scientific_name,
                                       count=1, confidence=payload.confidence, latest_at=detected.isoformat())
         self.spotlight_at = detected
-        self.spotlight_until = max(self.spotlight_until, until) if active and self.spotlight_until else until
-        self.log("info", f"Spotlighting {payload.common_name} until {self.spotlight_until.astimezone(_settings_timezone(settings)):%H:%M:%S}")
+        self.log("info", f"Spotlighting {payload.common_name} until {until.astimezone(_settings_timezone(settings)):%H:%M:%S}")
 
     async def render_after_detection(self) -> dict[str, Any]:
         """Render for new detections, keeping an unchanged spotlight instead of re-sending it."""
@@ -579,8 +582,9 @@ async def display_sync_worker(service: BirdFrameService, stop: asyncio.Event) ->
         except (AdapterError, OSError) as exc:
             service.log("warning", f"Automatic EO1 update deferred: {exc}")
         timeout = 30.0
-        if service.spotlight_until:
-            remaining = (service.spotlight_until - datetime.now(UTC)).total_seconds()
+        spotlight_until = service.spotlight_until()
+        if spotlight_until:
+            remaining = (spotlight_until - datetime.now(UTC)).total_seconds()
             if 0 < remaining < timeout:
                 timeout = remaining + 0.5
         try:
@@ -874,7 +878,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         base = str(request.base_url).rstrip("/")
         # The display endpoint remains stable for frames and other integrations,
         # while the revision query gives browsers a new cache key after rebuilds.
-        spotlight_until = service.spotlight_until if row["mode"] == "spotlight" and service.spotlight_active() else None
+        spotlight_until = service.spotlight_until() if row["mode"] == "spotlight" and service.spotlight_active() else None
         return composition_summary(row).model_dump(mode="json") | {
             "image_url": f"{base}/api/v1/display/current.jpg?revision={row['revision']}",
             "spotlight_until": spotlight_until.isoformat() if spotlight_until else None,
