@@ -1,7 +1,7 @@
 export type SourceRuntime = { state: string; last_activity_at?: string | null; last_detection_at?: string | null; reconnects: number; last_error?: string | null };
 export type Health = { status: string; version: string; composition_revision: number | null; needs_setup?: boolean; needs_admin?: boolean; source?: SourceRuntime };
 export type Detection = { id: string; common_name: string; scientific_name?: string; confidence?: number; detected_at: string; source_type?: string };
-export type Display = { revision?: number; mode?: string; image_url?: string; width?: number; height?: number; created_at?: string; species?: Array<{ common_name: string; count?: number }> };
+export type Display = { revision?: number; mode?: string; image_url?: string; width?: number; height?: number; created_at?: string; spotlight_until?: string | null; species?: Array<{ common_name: string; count?: number }> };
 export type RecentBird = { common_name: string; scientific_name?: string; count: number; confidence?: number; latest_at: string; image_url: string; has_artwork?: boolean };
 export type LogEntry = { id: number; level: string; message: string; created_at: string };
 export type LogPage = { items: LogEntry[]; total: number; limit: number; offset: number };

@@ -254,12 +254,14 @@ async def test_visitor_spotlight_shows_each_bird_then_resumes_the_collage(tmp_pa
         await service.sync_display_if_due()
         assert swift["revision"] in _shown_revisions()  # ignores the 30-minute interval
 
-        # The same species again only extends the window; nothing new is sent.
+        # The same species again neither restarts the timer nor sends anything.
+        swift_until = service.spotlight_until
         client.post("/api/v1/detections", json={
             "common_name": "Common Swift", "scientific_name": "Apus apus",
             "confidence": 1.0, "source_event_id": "swift-2",
         })
         assert _current(client)["revision"] == swift["revision"]
+        assert service.spotlight_until == swift_until
 
         client.post("/api/v1/detections", json={
             "common_name": "Eurasian Magpie", "scientific_name": "Pica pica",
@@ -271,11 +273,14 @@ async def test_visitor_spotlight_shows_each_bird_then_resumes_the_collage(tmp_pa
         await service.sync_display_if_due()
         assert magpie["revision"] in _shown_revisions()
         assert service.spotlight_until - datetime.now(UTC) > timedelta(minutes=4)
+        shown = client.get("/api/v1/display/current.json").json()
+        assert datetime.fromisoformat(shown["spotlight_until"]) == service.spotlight_until
 
         service.spotlight_until = datetime.now(UTC) - timedelta(seconds=1)
         await service.expire_spotlight()
         resumed = _current(client)
         assert resumed["mode"] == "collage"
+        assert client.get("/api/v1/display/current.json").json()["spotlight_until"] is None
         assert {item["common_name"] for item in resumed["species"]} == {"Common Swift", "Eurasian Magpie"}
         await service.sync_display_if_due()
         assert resumed["revision"] in _shown_revisions()

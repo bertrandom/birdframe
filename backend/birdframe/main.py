@@ -201,6 +201,9 @@ class BirdFrameService:
         if until <= now:
             return  # e.g. history seeded from BirdWeather
         active = self.spotlight_active(settings)
+        if active and self.spotlight and ((self.spotlight.scientific_name or self.spotlight.common_name)
+                                          == (payload.scientific_name or payload.common_name)):
+            return  # the bird on screen again leaves its timer alone
         if active and self.spotlight_at and detected < self.spotlight_at:
             # An older detection from the same batch still extends the window.
             self.spotlight_until = max(self.spotlight_until or until, until)
@@ -871,7 +874,11 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         base = str(request.base_url).rstrip("/")
         # The display endpoint remains stable for frames and other integrations,
         # while the revision query gives browsers a new cache key after rebuilds.
-        return composition_summary(row).model_dump(mode="json") | {"image_url": f"{base}/api/v1/display/current.jpg?revision={row['revision']}"}
+        spotlight_until = service.spotlight_until if row["mode"] == "spotlight" and service.spotlight_active() else None
+        return composition_summary(row).model_dump(mode="json") | {
+            "image_url": f"{base}/api/v1/display/current.jpg?revision={row['revision']}",
+            "spotlight_until": spotlight_until.isoformat() if spotlight_until else None,
+        }
 
     @app.get("/api/v1/display/events", dependencies=[Depends(display_guard)])
     async def display_events() -> StreamingResponse:

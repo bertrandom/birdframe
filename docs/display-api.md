@@ -7,7 +7,7 @@ preview, redirect, or re-render.
 | Endpoint | Use |
 | --- | --- |
 | `GET` / `HEAD` `/api/v1/display/current.jpg` | Current JPEG |
-| `GET` `/api/v1/display/current.json` | Revision, dimensions, ETag, mode, and species summary |
+| `GET` `/api/v1/display/current.json` | Revision, dimensions, ETag, mode, and species summary, plus `spotlight_until` (when a [visitor spotlight](eo1.md#visitor-spotlight) ends, or `null`) |
 | `GET` `/api/v1/display/events` | Optional server-sent events for revision changes |
 | `GET` `/api/v1/display/compositions/{revision}.jpg` | One revision's JPEG; immutable and cacheable for good. This is the URL BirdFrame gives the [EO1](eo1.md). |
 

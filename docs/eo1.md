@@ -44,9 +44,9 @@ layouts briefly hand the frame to each qualifying detection, one that passes
 the confidence threshold and the duplicate cooldown. BirdFrame renders the
 bird on its own with "Bird detected" and its English detection name, and sends
 it to the EO1 straight away, without waiting for the update interval. Each
-new qualifying detection replaces the bird and restarts the timer, which runs
-from the detection's time. A repeat of the bird already on screen extends the
-timer without sending the image again. When the timer runs out, the collage is
+new qualifying detection of a different species replaces the bird and
+restarts the timer, which runs from the detection's time. A repeat of the bird
+already on screen is ignored: the timer keeps running and nothing is sent. When the timer runs out, the collage is
 re-rendered and sent straight away as well. Quiet hours still apply. The
 spotlight is kept in memory, so after a restart BirdFrame goes back to the
 collage. The Latest visitor layout ignores the setting.
